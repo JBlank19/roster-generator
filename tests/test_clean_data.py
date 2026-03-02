@@ -1,4 +1,14 @@
-"""Tests for roster_generator.clean_data module."""
+"""Tests for roster_generator.clean_data module.
+
+Covers
+------
+- calculate_local_time(): summer/winter offsets, negative UTC offsets,
+  tz-naive output, missing/invalid timezones, index preservation, empty input.
+- clean(): output file creation, column renaming/dropping, invalid airport
+  filtering, missing registration filtering, date parsing (dayfirst),
+  AC_TYPE normalisation, local time offsets, AC_WAKE mapping
+  output date format, tolerance for missing optional columns.
+"""
 
 import sys
 from pathlib import Path
