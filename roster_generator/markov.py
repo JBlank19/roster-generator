@@ -65,14 +65,14 @@ def _prepare_base_flights(df, airline_filter=None):
             df.loc[zzz_mask, AIRLINE_COL] = df.loc[zzz_mask, AC_REG_COL].astype(str).str.strip()
         print(f"  Remapped {zzz_count} flights: AC_OPERATOR='ZZZ' -> AC_REG")
 
-    if AC_WAKE_COL not in df.columns:
-        df[AC_WAKE_COL] = "M"
-
     for c in [AC_REG_COL, AIRLINE_COL, AC_WAKE_COL, DEP_COL, ARR_COL]:
-        df[c] = df[c].fillna("").astype(str).str.strip()
+        if c in df.columns:
+            df[c] = df[c].fillna("").astype(str).str.strip()
 
-    df[AIRLINE_COL] = df[AIRLINE_COL].str.upper()
-    df[AC_WAKE_COL] = df[AC_WAKE_COL].str.upper().replace("", "M")
+    if AIRLINE_COL in df.columns:
+        df[AIRLINE_COL] = df[AIRLINE_COL].str.upper()
+    if AC_WAKE_COL in df.columns:
+        df[AC_WAKE_COL] = df[AC_WAKE_COL].str.upper()
 
     df["STD"] = pd.to_datetime(df[STD_COL], errors="coerce")
     df["STA"] = pd.to_datetime(df[STA_COL], errors="coerce")

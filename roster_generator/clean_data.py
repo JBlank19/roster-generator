@@ -176,6 +176,14 @@ def clean(dirty_file: str | Path, clean_file: str | Path) -> None:
             df_clean['AC_WAKE'] = df_clean['AC_TYPE'].map(wake_map)
             df_clean['AC_WAKE'] = df_clean['AC_WAKE'].replace({'L/M': 'M', 'M/H': 'H'})
 
+            # Drop missing or empty AC_WAKE
+            initial_count_before_wake = len(df_clean)
+            df_clean = df_clean.dropna(subset=['AC_WAKE'])
+            df_clean = df_clean[df_clean['AC_WAKE'].astype(str).str.strip() != ""]
+            dropped_wake = initial_count_before_wake - len(df_clean)
+            if dropped_wake > 0:
+                print(f"[Clean Data] Dropped {dropped_wake} rows with missing or empty AC_WAKE.")
+
             print("[Clean Data] AC_WAKE added.")
         except ImportError:
             print("[Clean Data] aircraft-list not installed. Run: pip install aircraft-list")
