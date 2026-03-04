@@ -2,6 +2,7 @@ from .airlines import generate_airlines
 from .airports import generate_airports
 from .clean_data import clean as clean_data
 from .config import PipelineConfig
+from .fleet import generate_fleet
 from .markov import generate_markov
 from .routes import generate_routes
 from .scheduled_flight_time import analyze_flight_time_distribution
