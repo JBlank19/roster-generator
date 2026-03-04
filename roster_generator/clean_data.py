@@ -1,6 +1,8 @@
 import argparse
 import calendar
+import csv
 from datetime import date
+from importlib import resources
 from pathlib import Path
 
 import pandas as pd
@@ -44,6 +46,33 @@ def calculate_local_time(df: pd.DataFrame, utc_col: str, tz_col: str) -> pd.Seri
             print(f"[Clean Data] Error converting timezone {tz_name}: {e}")
 
     return local_series
+
+
+def _load_wake_map() -> dict[str, str | None]:
+    """
+    Load ICAO wake categories from aircraft-list package data.
+
+    Uses importlib.resources to avoid aircraft_list.aircraft_models(), which
+    relies on deprecated pkg_resources.
+    """
+    try:
+        data_file = resources.files("aircraft_list").joinpath("aircraft_model_list.csv")
+    except Exception as exc:  # pragma: no cover - exercised via clean() ImportError path
+        raise ImportError("aircraft-list package resources are unavailable") from exc
+
+    try:
+        with data_file.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            wake_map: dict[str, str | None] = {}
+            for row in reader:
+                icao = (row.get("ICAO Designator") or row.get("icao") or "").strip().upper()
+                wake = (row.get("Wake Turbulence") or row.get("wake") or "").strip().upper()
+                if icao:
+                    wake_map[icao] = wake or None
+    except FileNotFoundError as exc:  # pragma: no cover - exercised via clean() ImportError path
+        raise ImportError("aircraft-list data file not found") from exc
+
+    return wake_map
 
 
 def clean(dirty_file: str | Path, clean_file: str | Path) -> None:
@@ -164,14 +193,7 @@ def clean(dirty_file: str | Path, clean_file: str | Path) -> None:
         df_clean['AC_TYPE'] = df_clean['AC_TYPE'].astype(str).str.strip().str.upper()
 
         try:
-            from aircraft_list import aircraft_models
-
-            ac_list = aircraft_models()
-            wake_map = {
-                (ac.get('icao') or '').strip().upper(): (ac.get('wake') or None)
-                for ac in ac_list
-                if ac.get('icao')
-            }
+            wake_map = _load_wake_map()
 
             df_clean['AC_WAKE'] = df_clean['AC_TYPE'].map(wake_map)
             df_clean['AC_WAKE'] = df_clean['AC_WAKE'].replace({'L/M': 'M', 'M/H': 'H'})
@@ -185,8 +207,10 @@ def clean(dirty_file: str | Path, clean_file: str | Path) -> None:
                 print(f"[Clean Data] Dropped {dropped_wake} rows with missing or empty AC_WAKE.")
 
             print("[Clean Data] AC_WAKE added.")
-        except ImportError:
-            print("[Clean Data] aircraft-list not installed. Run: pip install aircraft-list")
+        except ImportError as exc:
+            raise ImportError(
+                "[Clean Data] aircraft-list not installed. Run: pip install aircraft-list"
+            ) from exc
     else:
         print("[Clean Data] Column AC_TYPE not present; skipping AC_WAKE.")
 

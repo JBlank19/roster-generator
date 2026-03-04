@@ -10,9 +10,8 @@ Covers
   output date format, tolerance for missing optional columns.
 """
 
-import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
@@ -354,28 +353,29 @@ class TestClean:
 
     def test_ac_wake_column_present(self, tmp_path):
         """When aircraft-list is importable, AC_WAKE column should exist."""
-        fake_ac_list = [{"icao": "A320", "wake": "M"}]
-        mock_module = MagicMock(
-            aircraft_models=MagicMock(return_value=fake_ac_list),
-        )
         csv = _make_raw_csv(tmp_path, [VALID_FLIGHT])
 
-        with patch.dict(sys.modules, {"aircraft_list": mock_module}):
+        with patch("roster_generator.clean_data._load_wake_map", return_value={"A320": "M"}):
             out = tmp_path / "clean.csv"
             clean(csv, out)
             df = pd.read_csv(out)
             assert "AC_WAKE" in df.columns
 
+    def test_missing_aircraft_list_raises_error(self, tmp_path):
+        """When aircraft-list is not importable, clean() must raise ImportError."""
+        csv = _make_raw_csv(tmp_path, [VALID_FLIGHT])
+        out = tmp_path / "clean.csv"
+
+        with patch("roster_generator.clean_data._load_wake_map", side_effect=ImportError):
+            with pytest.raises(ImportError, match="aircraft-list not installed"):
+                clean(csv, out)
+
     def test_wake_lm_remapped_to_m(self, tmp_path):
         """L/M wake category should be remapped to M."""
-        fake_ac_list = [{"icao": "TEST", "wake": "L/M"}]
-        mock_module = MagicMock(
-            aircraft_models=MagicMock(return_value=fake_ac_list),
-        )
         row = {**VALID_FLIGHT, "AC Type": "TEST"}
         csv = _make_raw_csv(tmp_path, [row])
 
-        with patch.dict(sys.modules, {"aircraft_list": mock_module}):
+        with patch("roster_generator.clean_data._load_wake_map", return_value={"TEST": "L/M"}):
             out = tmp_path / "clean.csv"
             clean(csv, out)
             df = pd.read_csv(out)
@@ -383,14 +383,10 @@ class TestClean:
 
     def test_wake_mh_remapped_to_h(self, tmp_path):
         """M/H wake category should be remapped to H."""
-        fake_ac_list = [{"icao": "BIG1", "wake": "M/H"}]
-        mock_module = MagicMock(
-            aircraft_models=MagicMock(return_value=fake_ac_list),
-        )
         row = {**VALID_FLIGHT, "AC Type": "BIG1"}
         csv = _make_raw_csv(tmp_path, [row])
 
-        with patch.dict(sys.modules, {"aircraft_list": mock_module}):
+        with patch("roster_generator.clean_data._load_wake_map", return_value={"BIG1": "M/H"}):
             out = tmp_path / "clean.csv"
             clean(csv, out)
             df = pd.read_csv(out)
