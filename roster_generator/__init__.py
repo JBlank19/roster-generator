@@ -6,4 +6,5 @@ from .fleet import generate_fleet
 from .markov import generate_markov
 from .routes import generate_routes
 from .scheduled_flight_time import analyze_flight_time_distribution
+from .schedule import generate_schedule
 from .scheduled_turnaround import analyze_turnaround_distribution
