@@ -25,7 +25,7 @@ import random
 import numpy as np
 import pandas as pd
 
-from .config import PipelineConfig
+from roster_generator.config import PipelineConfig
 from .initial_conditions import InitialConditionModel
 
 # --- Column aliases ---

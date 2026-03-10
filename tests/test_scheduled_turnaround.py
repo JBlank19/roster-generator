@@ -27,7 +27,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from roster_generator.scheduled_turnaround import (
+from roster_generator.distribution_analysis.scheduled_turnaround import (
     _safe_shape,
     _fit_lognormal_params,
     _encode_sparse_hist,

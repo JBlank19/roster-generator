@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from roster_generator.markov import (
+from roster_generator.distribution_analysis.markov import (
     _to_minute_bin_preserve_day,
     _prepare_base_flights,
     _build_markov_tables,

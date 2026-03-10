@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from roster_generator.scheduled_flight_time import (
+from roster_generator.distribution_analysis.scheduled_flight_time import (
     _prepare_flights,
     _build_hourly_distributions,
     _build_operator_agnostic_distributions,
