@@ -28,7 +28,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from roster_generator.routes import (
+from roster_generator.auxiliary.routes import (
     _prepare_flights,
     _build_per_operator_stats,
     _build_operator_agnostic_stats,

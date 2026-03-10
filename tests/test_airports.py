@@ -22,7 +22,7 @@ Physical tests
 import pandas as pd
 import pytest
 
-from roster_generator.airports import (
+from roster_generator.auxiliary.airports import (
     _compute_capacities,
     generate_airports,
     DEP_COL,

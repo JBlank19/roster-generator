@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .config import PipelineConfig
+from roster_generator.config import PipelineConfig
 
 # --- Column aliases ---
 

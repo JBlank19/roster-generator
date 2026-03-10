@@ -23,7 +23,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from roster_generator.fleet import generate_fleet, REQUIRED_COLS
+from roster_generator.auxiliary.fleet import generate_fleet, REQUIRED_COLS
 from roster_generator.config import PipelineConfig
 
 

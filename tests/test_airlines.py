@@ -19,7 +19,7 @@ Physical tests
 import pandas as pd
 import pytest
 
-from roster_generator.airlines import generate_airlines, AIRLINE_COL
+from roster_generator.auxiliary.airlines import generate_airlines, AIRLINE_COL
 from roster_generator.config import PipelineConfig
 
 
