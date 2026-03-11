@@ -110,7 +110,7 @@ class TestToMinuteBinPreserveDay:
 class TestPrepareBaseFlights:
 
     def test_zzz_airline_remapped_to_ac_reg(self):
-        """Flights with AC_OPERATOR='ZZZ' get the AC_REG value instead."""
+        """Flights with AC_OPER='ZZZ' get the AC_REG value instead."""
         flights = [
             _make_flight("EC-ABC", "ZZZ", "M", "LEMD", "EGLL",
                          "2023-09-01 08:00", "2023-09-01 10:00"),

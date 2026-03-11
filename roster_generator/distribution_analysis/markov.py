@@ -31,12 +31,12 @@ from .initial_conditions import InitialConditionModel
 # --- Column aliases ---
 
 AC_REG_COL = "AC_REG"
-AIRLINE_COL = "AC_OPERATOR"
+AIRLINE_COL = "AC_OPER"
 AC_WAKE_COL = "AC_WAKE"
 DEP_COL = "DEP_ICAO"
 ARR_COL = "ARR_ICAO"
-STD_COL = "GATE_STD_UTC"
-STA_COL = "RWY_STA_UTC"
+STD_COL = "STD_REFTZ"
+STA_COL = "STA_REFTZ"
 
 
 # --- Helpers ---
@@ -49,6 +49,13 @@ def _to_minute_bin_preserve_day(value_mins):
     return int(round(value))
 
 
+def _require_columns(df: pd.DataFrame, required: list[str], label: str) -> None:
+    """Raise a clear error when required columns are missing."""
+    missing = [col for col in required if col not in df.columns]
+    if missing:
+        raise ValueError(f"Missing required columns in {label}: {missing}")
+
+
 # --- Data preparation ---
 
 def _prepare_base_flights(df, airline_filter=None):
@@ -57,13 +64,19 @@ def _prepare_base_flights(df, airline_filter=None):
     Handles the "ZZZ" sentinel airline (remaps to AC_REG), defaults missing
     wake categories to "M", and removes same-airport flights.
     """
+    _require_columns(
+        df,
+        [AC_REG_COL, AIRLINE_COL, DEP_COL, ARR_COL, STD_COL, STA_COL],
+        "schedule",
+    )
+
     # Remap placeholder airline "ZZZ" -> actual registration
     if AIRLINE_COL in df.columns and AC_REG_COL in df.columns:
         zzz_mask = df[AIRLINE_COL].astype(str).str.upper().str.strip() == "ZZZ"
         zzz_count = int(zzz_mask.sum())
         if zzz_count:
             df.loc[zzz_mask, AIRLINE_COL] = df.loc[zzz_mask, AC_REG_COL].astype(str).str.strip()
-        print(f"  Remapped {zzz_count} flights: AC_OPERATOR='ZZZ' -> AC_REG")
+        print(f"  Remapped {zzz_count} flights: AC_OPER='ZZZ' -> AC_REG")
 
     for c in [AC_REG_COL, AIRLINE_COL, AC_WAKE_COL, DEP_COL, ARR_COL]:
         if c in df.columns:
@@ -134,7 +147,7 @@ def _build_markov_tables(base_df):
     markov_fallback_hourly = {}
 
     for row in final_markov.itertuples(index=False):
-        op = str(row.AC_OPERATOR)
+        op = str(row.AC_OPER)
         wake = str(row.AC_WAKE)
         prev = str(row.PREV_ICAO)
         dep = str(row.DEP_ICAO)
@@ -157,7 +170,7 @@ def _build_markov_tables(base_df):
     )
 
     for row in fallback_grp.itertuples(index=False):
-        op = str(row.AC_OPERATOR)
+        op = str(row.AC_OPER)
         wake = str(row.AC_WAKE)
         dep = str(row.DEP_ICAO)
         arr = str(row.ARR_ICAO)

@@ -222,26 +222,33 @@ class TestClean:
             assert col not in df.columns
 
     def test_columns_renamed_correctly(self, raw_csv_path, tmp_path):
-        """Output must use the internal naming convention."""
+        """Output must match the strict schema exactly (names and order)."""
         out = tmp_path / "clean.csv"
         clean(raw_csv_path, out)
         df = pd.read_csv(out)
 
-        expected = {
-            "DEP_ICAO", "ARR_ICAO",
-            "GATE_STD_UTC", "GATE_ATD_UTC", "RWY_STA_UTC", "RWY_ATA_UTC",
-            "AC_TYPE", "AC_OPERATOR", "AC_REG",
-            "GATE_STD_LOCAL", "GATE_ATD_LOCAL", "RWY_STA_LOCAL", "RWY_ATA_LOCAL",
-        }
-        assert expected.issubset(set(df.columns))
+        expected = [
+            "DEP_ICAO",
+            "ARR_ICAO",
+            "STD_REFTZ",
+            "STA_REFTZ",
+            "ATD_REFTZ",
+            "ATA_REFTZ",
+            "AC_TYPE",
+            "AC_OPER",
+            "AC_REG",
+            "AC_WAKE",
+        ]
+        assert list(df.columns) == expected
 
     def test_tz_helper_columns_dropped(self, raw_csv_path, tmp_path):
-        """Intermediate DEP_TZ / ARR_TZ must not be in the output."""
+        """No timezone/local helper columns must appear in the output."""
         out = tmp_path / "clean.csv"
         clean(raw_csv_path, out)
         df = pd.read_csv(out)
         assert "DEP_TZ" not in df.columns
         assert "ARR_TZ" not in df.columns
+        assert not any(col.endswith("_LOCAL") for col in df.columns)
 
     def test_invalid_departure_airport_dropped(self, tmp_path):
         """Rows with a non-existent ICAO departure code are removed."""
@@ -286,9 +293,9 @@ class TestClean:
         csv = _make_raw_csv(tmp_path, [row])
         out = tmp_path / "clean.csv"
         clean(csv, out)
-        df = pd.read_csv(out, parse_dates=["GATE_STD_UTC"])
-        assert df.iloc[0]["GATE_STD_UTC"].month == 9
-        assert df.iloc[0]["GATE_STD_UTC"].day == 15
+        df = pd.read_csv(out, parse_dates=["STD_REFTZ"])
+        assert df.iloc[0]["STD_REFTZ"].month == 9
+        assert df.iloc[0]["STD_REFTZ"].day == 15
 
     def test_ac_type_stripped_and_uppercased(self, tmp_path):
         """AC_TYPE values should be stripped of whitespace and uppercased."""
@@ -299,33 +306,14 @@ class TestClean:
         df = pd.read_csv(out)
         assert df.iloc[0]["AC_TYPE"] == "A320"
 
-    def test_local_departure_time_offset(self, tmp_path):
-        """GATE_STD_LOCAL for Madrid in Sept should be UTC+2."""
-        row = {
-            **VALID_FLIGHT,
-            "ADEP": "LEMD",
-            "FILED OFF BLOCK TIME": "01-09-2023 08:00:00",
-        }
-        csv = _make_raw_csv(tmp_path, [row])
+    def test_local_time_columns_not_emitted(self, tmp_path):
+        """Cleaned output must not contain local-time columns."""
+        csv = _make_raw_csv(tmp_path, [VALID_FLIGHT])
         out = tmp_path / "clean.csv"
         clean(csv, out)
-        df = pd.read_csv(out, parse_dates=["GATE_STD_UTC", "GATE_STD_LOCAL"])
-        utc_hour = df.iloc[0]["GATE_STD_UTC"].hour
-        local_hour = df.iloc[0]["GATE_STD_LOCAL"].hour
-        assert local_hour - utc_hour == 2  # CEST
-
-    def test_local_arrival_time_offset(self, tmp_path):
-        """RWY_STA_LOCAL for London in Sept should be UTC+1 (BST)."""
-        row = {
-            **VALID_FLIGHT,
-            "ADES": "EGLL",
-            "FILED ARRIVAL TIME": "01-09-2023 10:00:00",
-        }
-        csv = _make_raw_csv(tmp_path, [row])
-        out = tmp_path / "clean.csv"
-        clean(csv, out)
-        df = pd.read_csv(out, parse_dates=["RWY_STA_LOCAL"])
-        assert df.iloc[0]["RWY_STA_LOCAL"].hour == 11  # BST = UTC+1
+        df = pd.read_csv(out)
+        for col in ["STD_LOCAL", "ATD_LOCAL", "STA_LOCAL", "ATA_LOCAL"]:
+            assert col not in df.columns
 
     def test_row_count_preserved_for_valid_data(self, raw_csv_path, tmp_path):
         """All rows with valid ICAO + registration should survive cleaning."""
@@ -334,9 +322,8 @@ class TestClean:
         df = pd.read_csv(out)
         assert len(df) == 3
 
-    def test_missing_optional_columns_tolerated(self, tmp_path):
-        """clean() should still work when AC Type / Operator / Registration
-        are absent from the source CSV."""
+    def test_missing_required_columns_raises_error(self, tmp_path):
+        """clean() must fail if any required source column is missing."""
         data = pd.DataFrame({
             "ADEP": ["LEMD"],
             "ADES": ["EGLL"],
@@ -348,8 +335,8 @@ class TestClean:
         csv = tmp_path / "raw.csv"
         data.to_csv(csv, index=False)
         out = tmp_path / "clean.csv"
-        clean(csv, out)
-        assert out.exists()
+        with pytest.raises(ValueError, match="Missing required source columns"):
+            clean(csv, out)
 
     def test_ac_wake_column_present(self, tmp_path):
         """When aircraft-list is importable, AC_WAKE column should exist."""
@@ -399,18 +386,5 @@ class TestClean:
         clean(csv, out)
         # Read as raw strings to check format
         df = pd.read_csv(out, dtype=str)
-        gate_std = df.iloc[0]["GATE_STD_UTC"]
-        assert gate_std.startswith("2023-09-01"), f"Unexpected format: {gate_std}"
-
-    def test_rwy_ata_local_computed(self, tmp_path):
-        """RWY_ATA_LOCAL should be RWY_ATA_UTC converted to arrival TZ."""
-        row = {
-            **VALID_FLIGHT,
-            "ADES": "EGLL",
-            "ACTUAL ARRIVAL TIME": "01-09-2023 10:00:00",
-        }
-        csv = _make_raw_csv(tmp_path, [row])
-        out = tmp_path / "clean.csv"
-        clean(csv, out)
-        df = pd.read_csv(out, parse_dates=["RWY_ATA_LOCAL"])
-        assert df.iloc[0]["RWY_ATA_LOCAL"].hour == 11  # BST = UTC+1
+        std_ref = df.iloc[0]["STD_REFTZ"]
+        assert std_ref.startswith("2023-09-01"), f"Unexpected format: {std_ref}"

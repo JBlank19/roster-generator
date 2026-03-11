@@ -389,7 +389,7 @@ def sample_initial_conditions(state: InitialConditionState, rng: random.Random) 
     for ac in aircraft:
         rows.append({
             "AC_REG": ac.reg,
-            "AC_OPERATOR": ac.airline,
+            "AC_OPER": ac.airline,
             "AC_WAKE": ac.wake,
             "PRIOR_ONLY": 1 if ac.prior_only else 0,
             "ORIGIN": "" if ac.prior_only else ac.origin,

@@ -12,12 +12,12 @@ import pandas as pd
 
 # Schedule input column names used across builders and samplers.
 AC_REG_COL = "AC_REG"
-AIRLINE_COL = "AC_OPERATOR"
+AIRLINE_COL = "AC_OPER"
 AC_WAKE_COL = "AC_WAKE"
 DEP_COL = "DEP_ICAO"
 ARR_COL = "ARR_ICAO"
-STD_COL = "GATE_STD_UTC"
-STA_COL = "RWY_STA_UTC"
+STD_COL = "STD_REFTZ"
+STA_COL = "STA_REFTZ"
 
 # Time discretization knobs.
 END_OF_DAY = 24 * 60

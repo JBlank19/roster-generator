@@ -87,7 +87,7 @@ class DataManager:
         self.markov_hourly = {}
         self.markov_fallback_hourly = {}
 
-        operators = markov_df["AC_OPERATOR"].to_numpy(dtype=object)
+        operators = markov_df["AC_OPER"].to_numpy(dtype=object)
         wakes = markov_df["AC_WAKE"].to_numpy(dtype=object)
         prev_origins = markov_df["PREV_ICAO"].to_numpy(dtype=object)
         origins = markov_df["DEP_ICAO"].to_numpy(dtype=object)

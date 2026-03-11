@@ -43,24 +43,24 @@ def main() -> int:
     # ------------------------------------------------------------------
     # Stage 0: Data Cleaning
     # ------------------------------------------------------------------
-    clean_file = "computed/clean_data/september2023.csv"
-    if not os.path.exists(clean_file):
-        print(f"[Main] {clean_file} not found. Cleaning data...")
+    input_file = "input/september2023.csv"
+    if not os.path.exists(input_file):
+        print(f"[Main] {input_file} not found. Cleaning data...")
         roster_generator.clean_data(
-            dirty_file="data/Flights_20230901_20230930.csv",
-            clean_file=clean_file,
+            dirty_file="ECTL/Flights_20230901_20230930.csv",
+            clean_file=input_file,
         )
         print("[Main] Cleaning data done.")
     else:
-        print(f"[Main] {clean_file} already exists. Skipping cleaning stage.")
+        print(f"[Main] {input_file} already exists. Skipping cleaning stage.")
 
     # ------------------------------------------------------------------
     # Setup
     # ------------------------------------------------------------------
     print("[Main] Setting up config...")
     config = roster_generator.PipelineConfig(
-        schedule_file=clean_file,
-        analysis_dir="computed/analysis",
+        schedule_file=input_file,
+        analysis_dir="computed",
         output_dir="output",
         seed=args.seed,
         suffix=suffix,

@@ -143,7 +143,7 @@ def _build_origin_distribution(state: InitialConditionState) -> None:
         .reset_index(name="COUNT")
     )
     for row in grouped.itertuples(index=False):
-        key = (str(row.AC_OPERATOR), str(row.AC_WAKE))
+        key = (str(row.AC_OPER), str(row.AC_WAKE))
         if key not in state.origin_counts:
             state.origin_counts[key] = {}
         state.origin_counts[key][str(row.DEP_ICAO)] = int(row.COUNT)
@@ -218,7 +218,7 @@ def _build_prior_only_probabilities(flights: pd.DataFrame, state: InitialConditi
     state.prior_only_events = prior_only
 
     for row in combined.itertuples(index=False):
-        a = str(row.AC_OPERATOR)
+        a = str(row.AC_OPER)
         w = str(row.AC_WAKE)
         n_with_dep = float(row.N_WITH_DEP)
         n_only = float(row.N_ONLY)
@@ -252,7 +252,7 @@ def _build_scheduled_flight_time_lookup(flights: pd.DataFrame, state: InitialCon
     )
 
     for row in med.itertuples(index=False):
-        key = (str(row.AC_OPERATOR), str(row.AC_WAKE), str(row.DEP_ICAO), str(row.ARR_ICAO))
+        key = (str(row.AC_OPER), str(row.AC_WAKE), str(row.DEP_ICAO), str(row.ARR_ICAO))
         state.flight_time_median[key] = int(round(float(row.MED)))
 
 

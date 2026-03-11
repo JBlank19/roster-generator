@@ -27,27 +27,40 @@ from roster_generator.config import PipelineConfig
 # --- Column aliases & constants ---
 
 AC_REG_COL = "AC_REG"
-AIRLINE_COL = "AC_OPERATOR"
+AIRLINE_COL = "AC_OPER"
 DEP_STATION_COL = "DEP_ICAO"
 ARR_STATION_COL = "ARR_ICAO"
-STD_COL = "GATE_STD_UTC"
-STA_COL = "RWY_STA_UTC"
+STD_COL = "STD_REFTZ"
+STA_COL = "STA_REFTZ"
 
 BIN_SIZE = 5        # Flight time bin size (minutes)
 MIN_SAMPLES = 3     # Minimum samples to create a distribution
+
+
+def _require_columns(df: pd.DataFrame, required: list[str], label: str) -> None:
+    """Raise a clear error when required columns are missing."""
+    missing = [col for col in required if col not in df.columns]
+    if missing:
+        raise ValueError(f"Missing required columns in {label}: {missing}")
 
 
 # --- Data preparation ---
 
 def _prepare_flights(df: pd.DataFrame) -> pd.DataFrame:
     """Normalise columns, remap ZZZ airlines, compute flight duration and bins."""
+    _require_columns(
+        df,
+        [AC_REG_COL, AIRLINE_COL, DEP_STATION_COL, ARR_STATION_COL, STD_COL, STA_COL],
+        "schedule",
+    )
+
     # Remap placeholder airline "ZZZ" -> actual registration
     if AIRLINE_COL in df.columns and AC_REG_COL in df.columns:
         zzz_mask = df[AIRLINE_COL].astype(str).str.upper().str.strip() == "ZZZ"
         zzz_count = int(zzz_mask.sum())
         if zzz_count:
             df.loc[zzz_mask, AIRLINE_COL] = df.loc[zzz_mask, AC_REG_COL].astype(str).str.strip()
-        print(f"  Remapped {zzz_count} flights: AC_OPERATOR='ZZZ' -> AC_REG")
+        print(f"  Remapped {zzz_count} flights: AC_OPER='ZZZ' -> AC_REG")
 
     # Default missing wake to M
     if "AC_WAKE" not in df.columns:

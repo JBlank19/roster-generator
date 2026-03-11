@@ -8,6 +8,31 @@ from pathlib import Path
 import pandas as pd
 import airportsdata
 
+REQUIRED_SOURCE_COLUMNS = [
+    "ADEP",
+    "ADES",
+    "FILED OFF BLOCK TIME",
+    "FILED ARRIVAL TIME",
+    "ACTUAL OFF BLOCK TIME",
+    "ACTUAL ARRIVAL TIME",
+    "AC Type",
+    "AC Operator",
+    "AC Registration",
+]
+
+FINAL_COLUMNS = [
+    "DEP_ICAO",
+    "ARR_ICAO",
+    "STD_REFTZ",
+    "STA_REFTZ",
+    "ATD_REFTZ",
+    "ATA_REFTZ",
+    "AC_TYPE",
+    "AC_OPER",
+    "AC_REG",
+    "AC_WAKE",
+]
+
 
 def calculate_local_time(df: pd.DataFrame, utc_col: str, tz_col: str) -> pd.Series:
     """
@@ -79,9 +104,8 @@ def clean(dirty_file: str | Path, clean_file: str | Path) -> None:
     """
     Clean EUROCONTROL flight data and save the result.
 
-    Loads raw CSV data, validates airport codes, converts timestamps to both
-    UTC and local time, adds wake turbulence categories, and exports a
-    cleaned CSV.
+    Loads raw CSV data, validates airport codes, converts timestamps to UTC,
+    adds wake turbulence categories, and exports a strict cleaned CSV.
 
     Parameters
     ----------
@@ -101,43 +125,29 @@ def clean(dirty_file: str | Path, clean_file: str | Path) -> None:
     print(f"[Clean Data] Loading flight data from {input_file}...")
     df = pd.read_csv(input_file)
 
-    # 2. Define Columns
-    original_columns = [
-        'ADEP',
-        'ADES',
-        'FILED OFF BLOCK TIME',
-        'FILED ARRIVAL TIME',
-        'ACTUAL OFF BLOCK TIME',
-        'ACTUAL ARRIVAL TIME',
-        'AC Type',
-        'AC Operator',
-        'AC Registration'
-    ]
-
-    missing_cols = [col for col in original_columns if col not in df.columns]
+    # 2. Validate source schema
+    missing_cols = [col for col in REQUIRED_SOURCE_COLUMNS if col not in df.columns]
     if missing_cols:
-        print(f"[Clean Data] Warning: The following columns were not found in source: {missing_cols}")
-        original_columns = [col for col in original_columns if col in df.columns]
+        raise ValueError(f"[Clean Data] Missing required source columns: {missing_cols}")
 
-    df_clean = df[original_columns].copy()
+    df_clean = df[REQUIRED_SOURCE_COLUMNS].copy()
 
     # 3. Data Cleaning & Formatting
     # A. Process Dates (UTC)
     time_cols = [
-        'FILED OFF BLOCK TIME',
-        'FILED ARRIVAL TIME',
-        'ACTUAL OFF BLOCK TIME',
-        'ACTUAL ARRIVAL TIME'
+        "FILED OFF BLOCK TIME",
+        "FILED ARRIVAL TIME",
+        "ACTUAL OFF BLOCK TIME",
+        "ACTUAL ARRIVAL TIME",
     ]
 
     print("[Clean Data] Processing UTC timestamps...")
     for col in time_cols:
-        if col in df_clean.columns:
-            df_clean[col] = pd.to_datetime(df_clean[col], dayfirst=True, errors='coerce')
-            if df_clean[col].dt.tz is None:
-                df_clean[col] = df_clean[col].dt.tz_localize('UTC')
-            else:
-                df_clean[col] = df_clean[col].dt.tz_convert('UTC')
+        df_clean[col] = pd.to_datetime(df_clean[col], dayfirst=True, errors="coerce")
+        if df_clean[col].dt.tz is None:
+            df_clean[col] = df_clean[col].dt.tz_localize("UTC")
+        else:
+            df_clean[col] = df_clean[col].dt.tz_convert("UTC")
 
     # B. Validate Airports
     print("[Clean Data] Validating airports against airportsdata library...")
@@ -152,56 +162,39 @@ def clean(dirty_file: str | Path, clean_file: str | Path) -> None:
     print(f"[Clean Data] Dropped {initial_count - len(df_clean)} rows with invalid or unknown airport codes.")
 
     # C. Clean Aircraft Registration
-    if 'AC Registration' in df_clean.columns:
-        df_clean = df_clean.dropna(subset=['AC Registration'])
+    df_clean = df_clean.dropna(subset=["AC Registration"])
 
     # 4. Rename Columns
     print("[Clean Data] Renaming columns...")
     rename_map = {
-        'ADEP': 'DEP_ICAO',
-        'ADES': 'ARR_ICAO',
-        'FILED OFF BLOCK TIME': 'GATE_STD_UTC',
-        'ACTUAL OFF BLOCK TIME': 'GATE_ATD_UTC',
-        'FILED ARRIVAL TIME': 'RWY_STA_UTC',
-        'ACTUAL ARRIVAL TIME': 'RWY_ATA_UTC',
-        'AC Type': 'AC_TYPE',
-        'AC Operator': 'AC_OPERATOR',
-        'AC Registration': 'AC_REG'
+        "ADEP": "DEP_ICAO",
+        "ADES": "ARR_ICAO",
+        "FILED OFF BLOCK TIME": "STD_REFTZ",
+        "ACTUAL OFF BLOCK TIME": "ATD_REFTZ",
+        "FILED ARRIVAL TIME": "STA_REFTZ",
+        "ACTUAL ARRIVAL TIME": "ATA_REFTZ",
+        "AC Type": "AC_TYPE",
+        "AC Operator": "AC_OPER",
+        "AC Registration": "AC_REG",
     }
     df_clean = df_clean.rename(columns=rename_map)
-
-    # Calculate Local Times
-    print("[Clean Data] Calculating Local Times based on Airport Timezones...")
-
-    airport_tz_map = {icao: data['tz'] for icao, data in airports.items()}
-
-    df_clean['DEP_TZ'] = df_clean['DEP_ICAO'].map(airport_tz_map)
-    df_clean['ARR_TZ'] = df_clean['ARR_ICAO'].map(airport_tz_map)
-
-    df_clean['GATE_STD_LOCAL'] = calculate_local_time(df_clean, 'GATE_STD_UTC', 'DEP_TZ')
-    df_clean['GATE_ATD_LOCAL'] = calculate_local_time(df_clean, 'GATE_ATD_UTC', 'DEP_TZ')
-
-    df_clean['RWY_STA_LOCAL'] = calculate_local_time(df_clean, 'RWY_STA_UTC', 'ARR_TZ')
-    df_clean['RWY_ATA_LOCAL'] = calculate_local_time(df_clean, 'RWY_ATA_UTC', 'ARR_TZ')
-
-    df_clean.drop(columns=['DEP_TZ', 'ARR_TZ'], inplace=True)
 
     # Add AC_WAKE (ICAO Wake Turbulence Category)
     print("[Clean Data] Adding AC_WAKE from aircraft-list (ICAO Doc 8643)...")
 
-    if 'AC_TYPE' in df_clean.columns:
-        df_clean['AC_TYPE'] = df_clean['AC_TYPE'].astype(str).str.strip().str.upper()
+    if "AC_TYPE" in df_clean.columns:
+        df_clean["AC_TYPE"] = df_clean["AC_TYPE"].astype(str).str.strip().str.upper()
 
         try:
             wake_map = _load_wake_map()
 
-            df_clean['AC_WAKE'] = df_clean['AC_TYPE'].map(wake_map)
-            df_clean['AC_WAKE'] = df_clean['AC_WAKE'].replace({'L/M': 'M', 'M/H': 'H'})
+            df_clean["AC_WAKE"] = df_clean["AC_TYPE"].map(wake_map)
+            df_clean["AC_WAKE"] = df_clean["AC_WAKE"].replace({"L/M": "M", "M/H": "H"})
 
             # Drop missing or empty AC_WAKE
             initial_count_before_wake = len(df_clean)
-            df_clean = df_clean.dropna(subset=['AC_WAKE'])
-            df_clean = df_clean[df_clean['AC_WAKE'].astype(str).str.strip() != ""]
+            df_clean = df_clean.dropna(subset=["AC_WAKE"])
+            df_clean = df_clean[df_clean["AC_WAKE"].astype(str).str.strip() != ""]
             dropped_wake = initial_count_before_wake - len(df_clean)
             if dropped_wake > 0:
                 print(f"[Clean Data] Dropped {dropped_wake} rows with missing or empty AC_WAKE.")
@@ -212,9 +205,15 @@ def clean(dirty_file: str | Path, clean_file: str | Path) -> None:
                 "[Clean Data] aircraft-list not installed. Run: pip install aircraft-list"
             ) from exc
     else:
-        print("[Clean Data] Column AC_TYPE not present; skipping AC_WAKE.")
+        raise ValueError("[Clean Data] Column AC_TYPE not present in cleaned data.")
 
-    # 5. Export
+    # 5. Enforce strict output schema (exact columns and order)
+    missing_final = [col for col in FINAL_COLUMNS if col not in df_clean.columns]
+    if missing_final:
+        raise ValueError(f"[Clean Data] Missing required output columns: {missing_final}")
+    df_clean = df_clean[FINAL_COLUMNS].copy()
+
+    # 6. Export
     print(f"[Clean Data] Saving cleaned data to {output_file}...")
     output_file.parent.mkdir(parents=True, exist_ok=True)
     df_clean.to_csv(output_file, index=False, date_format='%Y-%m-%d %H:%M:%S')

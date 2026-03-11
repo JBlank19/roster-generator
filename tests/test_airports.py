@@ -52,7 +52,7 @@ def _make_markov(dep_airports, arr_airports) -> pd.DataFrame:
         rows.append({
             DEP_COL: dep,
             ARR_COL: arr,
-            "AC_OPERATOR": "IBE",
+            "AC_OPER": "IBE",
             "AC_WAKE": "M",
             "PREV_ICAO": "ZZZZ",
             "DEP_HOUR_UTC": 8,

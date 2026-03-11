@@ -96,7 +96,7 @@ def test_sample_initial_conditions_schema_and_unique_regs(prepared_df, markov_ta
 
     expected_cols = [
         "AC_REG",
-        "AC_OPERATOR",
+        "AC_OPER",
         "AC_WAKE",
         "PRIOR_ONLY",
         "ORIGIN",
@@ -153,7 +153,7 @@ def test_turnaround_constraint_holds(prepared_df, markov_tables):
         & (ic_df["PRIOR_ONLY"].astype(int) != 1)
     ]
     for row in rows.itertuples(index=False):
-        min_ta = model._get_phys_ta_min(str(row.AC_OPERATOR), str(row.AC_WAKE))
+        min_ta = model._get_phys_ta_min(str(row.AC_OPER), str(row.AC_WAKE))
         assert int(row.STD_UTC_MINS) - int(row.PRIOR_STA_UTC_MINS) >= min_ta
 
 

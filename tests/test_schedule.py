@@ -64,7 +64,7 @@ def _make_initial_conditions(*rows) -> pd.DataFrame:
     """Build an initial_conditions DataFrame.
 
     Each row is a dict with keys:
-      AC_REG, AC_OPERATOR, AC_WAKE, ORIGIN, DEST,
+      AC_REG, AC_OPER, AC_WAKE, ORIGIN, DEST,
       STD_UTC_MINS, STA_UTC_MINS, SINGLE_FLIGHT, PRIOR_ONLY
     and optionally PRIOR_ORIGIN, PRIOR_DEST, PRIOR_STD_UTC_MINS, PRIOR_STA_UTC_MINS.
     """
@@ -88,7 +88,7 @@ def _make_airports(*rows) -> pd.DataFrame:
 def _make_markov(*rows) -> pd.DataFrame:
     """Build a markov DataFrame from (op, wake, prev, dep, arr, hour, count) tuples."""
     return pd.DataFrame(rows, columns=[
-        "AC_OPERATOR", "AC_WAKE", "PREV_ICAO", "DEP_ICAO",
+        "AC_OPER", "AC_WAKE", "PREV_ICAO", "DEP_ICAO",
         "ARR_ICAO", "DEP_HOUR_UTC", "COUNT",
     ])
 
@@ -162,7 +162,7 @@ TURNAROUND_TEMPORAL = _make_turnaround_temporal_profile(
 
 IC_STANDARD = _make_initial_conditions(
     {
-        "AC_REG": "AC001", "AC_OPERATOR": "IBE", "AC_WAKE": "M",
+        "AC_REG": "AC001", "AC_OPER": "IBE", "AC_WAKE": "M",
         "ORIGIN": "LEMD", "DEST": "EGLL",
         "STD_UTC_MINS": 480, "STA_UTC_MINS": 600,
         "SINGLE_FLIGHT": 0, "PRIOR_ONLY": 0,
@@ -171,13 +171,13 @@ IC_STANDARD = _make_initial_conditions(
 
 IC_TWO_AIRCRAFT = _make_initial_conditions(
     {
-        "AC_REG": "AC001", "AC_OPERATOR": "IBE", "AC_WAKE": "M",
+        "AC_REG": "AC001", "AC_OPER": "IBE", "AC_WAKE": "M",
         "ORIGIN": "LEMD", "DEST": "EGLL",
         "STD_UTC_MINS": 480, "STA_UTC_MINS": 600,
         "SINGLE_FLIGHT": 0, "PRIOR_ONLY": 0,
     },
     {
-        "AC_REG": "AC002", "AC_OPERATOR": "IBE", "AC_WAKE": "M",
+        "AC_REG": "AC002", "AC_OPER": "IBE", "AC_WAKE": "M",
         "ORIGIN": "EGLL", "DEST": "LEMD",
         "STD_UTC_MINS": 540, "STA_UTC_MINS": 660,
         "SINGLE_FLIGHT": 0, "PRIOR_ONLY": 0,
@@ -186,7 +186,7 @@ IC_TWO_AIRCRAFT = _make_initial_conditions(
 
 IC_SINGLE_FLIGHT = _make_initial_conditions(
     {
-        "AC_REG": "AC010", "AC_OPERATOR": "IBE", "AC_WAKE": "M",
+        "AC_REG": "AC010", "AC_OPER": "IBE", "AC_WAKE": "M",
         "ORIGIN": "LEMD", "DEST": "EGLL",
         "STD_UTC_MINS": 480, "STA_UTC_MINS": 600,
         "SINGLE_FLIGHT": 1, "PRIOR_ONLY": 0,
@@ -443,7 +443,7 @@ class TestScheduleRefactorGuards:
             [
                 {
                     "AC_REG": "AC999",
-                    "AC_OPERATOR": "IBE",
+                    "AC_OPER": "IBE",
                     "AC_WAKE": "M",
                     "ORIGIN": "",
                     "DEST": "",
@@ -468,7 +468,7 @@ class TestScheduleRefactorGuards:
             [
                 {
                     "AC_REG": "AC998",
-                    "AC_OPERATOR": "IBE",
+                    "AC_OPER": "IBE",
                     "AC_WAKE": "M",
                     "ORIGIN": "LEMD",
                     "DEST": "EGLL",

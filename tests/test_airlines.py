@@ -4,7 +4,7 @@ Covers
 ------
 - generate_airlines(): sys.exit(1) on missing initial-conditions file,
   output file creation, suffix support, column schema, correct extraction
-  of unique AC_OPERATOR values, alphabetical sorting.
+  of unique AC_OPER values, alphabetical sorting.
 
 Physical tests
 --------------
@@ -28,7 +28,7 @@ from roster_generator.config import PipelineConfig
 # ---------------------------------------------------------------------------
 
 def _make_initial_conditions(*operators) -> pd.DataFrame:
-    """Build a minimal initial_conditions DataFrame with given AC_OPERATOR values."""
+    """Build a minimal initial_conditions DataFrame with given AC_OPER values."""
     return pd.DataFrame({
         AIRLINE_COL: list(operators),
         "AC_REG": [f"EC-{i:03d}" for i in range(len(operators))],
@@ -103,7 +103,7 @@ class TestGenerateAirlinesSoftware:
         assert list(df.columns) == ["airline_id"]
 
     def test_deduplicates_operators(self, tmp_path):
-        """Repeated AC_OPERATOR values must produce a single output row each."""
+        """Repeated AC_OPER values must produce a single output row each."""
         ic = _make_initial_conditions("IBE", "IBE", "IBE")
         ic_path = tmp_path / "analysis" / "initial_conditions.csv"
         _write_csv(ic_path, ic)
@@ -118,7 +118,7 @@ class TestGenerateAirlinesSoftware:
         assert df.iloc[0]["airline_id"] == "IBE"
 
     def test_all_unique_operators_present(self, tmp_path):
-        """Every distinct AC_OPERATOR value must appear in the output."""
+        """Every distinct AC_OPER value must appear in the output."""
         ic = _make_initial_conditions("IBE", "VLG", "RYR")
         ic_path = tmp_path / "analysis" / "initial_conditions.csv"
         _write_csv(ic_path, ic)
@@ -132,7 +132,7 @@ class TestGenerateAirlinesSoftware:
         assert set(df["airline_id"]) == {"IBE", "VLG", "RYR"}
 
     def test_output_row_count_matches_distinct_operators(self, tmp_path):
-        """Number of output rows equals the number of unique AC_OPERATOR values."""
+        """Number of output rows equals the number of unique AC_OPER values."""
         ic = _make_initial_conditions("IBE", "VLG", "RYR", "IBE", "RYR")
         ic_path = tmp_path / "analysis" / "initial_conditions.csv"
         _write_csv(ic_path, ic)

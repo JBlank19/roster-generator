@@ -1,7 +1,7 @@
 """
 Airline Catalogue
 
-Extracts the unique set of airline ICAO codes (``AC_OPERATOR``) that appear
+Extracts the unique set of airline ICAO codes (``AC_OPER``) that appear
 in the sampled initial conditions and writes them as a flat list.
 
 Input:
@@ -24,7 +24,7 @@ from roster_generator.config import PipelineConfig
 
 # --- Column aliases ---
 
-AIRLINE_COL = "AC_OPERATOR"
+AIRLINE_COL = "AC_OPER"
 
 
 # --- Public API ---
@@ -35,7 +35,7 @@ def generate_airlines(config: PipelineConfig) -> None:
     Steps:
 
     1. Load ``initial_conditions{suffix}.csv`` from ``analysis_dir``.
-    2. Extract unique ``AC_OPERATOR`` values, sort alphabetically.
+    2. Extract unique ``AC_OPER`` values, sort alphabetically.
     3. Save the result to ``output_dir/airlines{suffix}.csv``.
 
     Parameters
@@ -61,7 +61,7 @@ def generate_airlines(config: PipelineConfig) -> None:
     print(f"[Airlines] Initial conditions: {input_path}")
     df = pd.read_csv(input_path)
 
-    # 2. Extract unique AC_OPERATOR values
+    # 2. Extract unique AC_OPER values
     airlines = (
         df[[AIRLINE_COL]]
         .drop_duplicates()

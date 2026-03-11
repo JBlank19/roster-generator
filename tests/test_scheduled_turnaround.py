@@ -271,7 +271,7 @@ class TestPrepareTurnaroundEventsSoftware:
         assert expected == set(intraday_events.columns)
 
     def test_zzz_airline_remapped(self):
-        """Flights with AC_OPERATOR='ZZZ' get AC_REG as airline."""
+        """Flights with AC_OPER='ZZZ' get AC_REG as airline."""
         flights = [
             _make_flight("EC-ABC", "ZZZ", "M", "LEMD", "EGLL",
                          "2023-09-01 08:00", "2023-09-01 10:00"),

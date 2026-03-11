@@ -9,7 +9,7 @@ Input:
 
 Output:
   - fleet{suffix}.csv
-      columns: AC_REG, AC_OPERATOR, AC_WAKE
+      columns: AC_REG, AC_OPER, AC_WAKE
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from roster_generator.config import PipelineConfig
 
 # --- Column aliases ---
 
-REQUIRED_COLS = ["AC_REG", "AC_OPERATOR", "AC_WAKE"]
+REQUIRED_COLS = ["AC_REG", "AC_OPER", "AC_WAKE"]
 
 
 # --- Public API ---
@@ -35,7 +35,7 @@ def generate_fleet(config: PipelineConfig) -> None:
     Steps:
 
     1. Load ``initial_conditions{suffix}.csv`` from ``analysis_dir``.
-    2. Select columns ``AC_REG``, ``AC_OPERATOR``, ``AC_WAKE``.
+    2. Select columns ``AC_REG``, ``AC_OPER``, ``AC_WAKE``.
     3. Drop duplicate registrations.
     4. Save the result to ``output_dir/fleet{suffix}.csv``.
 

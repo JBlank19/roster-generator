@@ -29,9 +29,9 @@ from roster_generator.config import PipelineConfig
 
 DEP_COL = "DEP_ICAO"
 ARR_COL = "ARR_ICAO"
-STD_COL = "GATE_STD_UTC"
-STA_COL = "RWY_STA_UTC"
-AIRLINE_COL = "AC_OPERATOR"
+STD_COL = "STD_REFTZ"
+STA_COL = "STA_REFTZ"
+AIRLINE_COL = "AC_OPER"
 AC_REG_COL = "AC_REG"
 
 
@@ -48,7 +48,7 @@ def _compute_capacities(schedule_df: pd.DataFrame, airports: list[str]) -> pd.Da
     Parameters
     ----------
     schedule_df : pandas.DataFrame
-        Full cleaned schedule with ``GATE_STD_UTC`` and ``RWY_STA_UTC`` columns.
+        Full cleaned schedule with ``STD_REFTZ`` and ``STA_REFTZ`` columns.
     airports : list of str
         ICAO codes for which capacities should be computed.
 
@@ -131,6 +131,13 @@ def _compute_capacities(schedule_df: pd.DataFrame, airports: list[str]) -> pd.Da
     return result
 
 
+def _require_columns(df: pd.DataFrame, required: list[str], label: str) -> None:
+    """Raise a clear error when required columns are missing."""
+    missing = [col for col in required if col not in df.columns]
+    if missing:
+        raise ValueError(f"Missing required columns in {label}: {missing}")
+
+
 # --- Public API ---
 
 def generate_airports(config: PipelineConfig) -> None:
@@ -178,6 +185,7 @@ def generate_airports(config: PipelineConfig) -> None:
     if config.schedule_file.exists():
         print(f"[Airports] Schedule: {config.schedule_file}")
         schedule_df = pd.read_csv(config.schedule_file)
+        _require_columns(schedule_df, [DEP_COL, ARR_COL, STD_COL, STA_COL], "schedule")
 
         # Capacities
         capacity_df = _compute_capacities(schedule_df, all_airports)

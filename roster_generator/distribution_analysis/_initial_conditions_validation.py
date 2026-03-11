@@ -36,8 +36,8 @@ def validate_initial_conditions(
     )
 
     for row in ic_df[with_prior_and_first].itertuples(index=False):
-        key = (str(row.AC_OPERATOR), str(row.AC_WAKE))
-        min_ta = get_phys_ta_min(str(row.AC_OPERATOR), str(row.AC_WAKE))
+        key = (str(row.AC_OPER), str(row.AC_WAKE))
+        min_ta = get_phys_ta_min(str(row.AC_OPER), str(row.AC_WAKE))
         if int(row.STD_UTC_MINS) - int(row.PRIOR_STA_UTC_MINS) < min_ta:
             raise ValueError(
                 "Validation failed: first_STD - prior_STA below phys_ta for "

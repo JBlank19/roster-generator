@@ -11,7 +11,7 @@ Physical tests
 - AC_REG values are non-empty strings (no null registrations).
 - No duplicate AC_REG rows in the output (each aircraft appears once).
 - AC_WAKE values belong to a finite, known set (H, M, L, J).
-- AC_OPERATOR values are non-empty strings.
+- AC_OPER values are non-empty strings.
 - An input with N distinct registrations produces exactly N output rows.
 - A registration appearing multiple times in initial_conditions is
   deduplicated to a single row.
@@ -38,9 +38,9 @@ VALID_WAKE_CATEGORIES = {"H", "M", "L", "J"}
 def _make_initial_conditions(*rows) -> pd.DataFrame:
     """Build a minimal initial_conditions DataFrame.
 
-    Each element of *rows* is a (AC_REG, AC_OPERATOR, AC_WAKE) tuple.
+    Each element of *rows* is a (AC_REG, AC_OPER, AC_WAKE) tuple.
     """
-    return pd.DataFrame(rows, columns=["AC_REG", "AC_OPERATOR", "AC_WAKE"])
+    return pd.DataFrame(rows, columns=["AC_REG", "AC_OPER", "AC_WAKE"])
 
 
 def _write_csv(path, df: pd.DataFrame) -> None:
@@ -98,7 +98,7 @@ class TestGenerateFleetSoftware:
 
     def test_exits_when_required_columns_missing(self, tmp_path):
         """sys.exit(1) must be raised when the initial_conditions file lacks
-        one or more of AC_REG, AC_OPERATOR, AC_WAKE."""
+        one or more of AC_REG, AC_OPER, AC_WAKE."""
         # File exists but has none of the required columns
         ic = pd.DataFrame({"SOME_COL": ["foo", "bar"]})
         ic_path = tmp_path / "analysis" / "initial_conditions.csv"
@@ -114,7 +114,7 @@ class TestGenerateFleetSoftware:
 
     def test_exits_when_single_required_column_missing(self, tmp_path):
         """sys.exit(1) must be raised even when only one required column is absent."""
-        ic = pd.DataFrame({"AC_REG": ["EC-001"], "AC_OPERATOR": ["IBE"]})
+        ic = pd.DataFrame({"AC_REG": ["EC-001"], "AC_OPER": ["IBE"]})
         # AC_WAKE is missing
         ic_path = tmp_path / "analysis" / "initial_conditions.csv"
         _write_csv(ic_path, ic)
@@ -146,7 +146,7 @@ class TestGenerateFleetSoftware:
         assert not (tmp_path / "analysis" / "fleet.csv").exists()
 
     def test_output_column_schema(self, tmp_path):
-        """Output CSV must have exactly columns: AC_REG, AC_OPERATOR, AC_WAKE."""
+        """Output CSV must have exactly columns: AC_REG, AC_OPER, AC_WAKE."""
         cfg = _make_config(tmp_path)
         generate_fleet(cfg)
         df = pd.read_csv(tmp_path / "output" / "fleet.csv")
@@ -262,14 +262,14 @@ class TestGenerateFleetPhysical:
         assert (df["AC_REG"].str.strip() != "").all()
 
     def test_ac_operator_non_empty(self, tmp_path):
-        """No AC_OPERATOR in the output may be null or empty."""
+        """No AC_OPER in the output may be null or empty."""
         df = self._run(
             tmp_path,
             ("EC-001", "IBE", "M"),
             ("EC-002", "VLG", "M"),
         )
-        assert df["AC_OPERATOR"].notna().all()
-        assert (df["AC_OPERATOR"].str.strip() != "").all()
+        assert df["AC_OPER"].notna().all()
+        assert (df["AC_OPER"].str.strip() != "").all()
 
     def test_wake_categories_valid(self, tmp_path):
         """All AC_WAKE values must belong to the set {H, M, L, J}"""

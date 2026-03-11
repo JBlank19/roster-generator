@@ -155,7 +155,7 @@ def load_initial_conditions(initial_conditions_path: Path) -> List[Aircraft]:
         is_prior_only = bool(getattr(row, "PRIOR_ONLY", 0))
         aircraft = Aircraft(
             reg=row.AC_REG,
-            operator=row.AC_OPERATOR,
+            operator=row.AC_OPER,
             wake=row.AC_WAKE,
             initial_flight=_build_initial_flight(row, is_prior_only=is_prior_only),
             prior_flight=_build_prior_flight(row),
