@@ -20,6 +20,13 @@ import numpy as np
 import pandas as pd
 
 from roster_generator.config import PipelineConfig
+from roster_generator.time_window import (
+    DEFAULT_REFTZ,
+    DEFAULT_WINDOW_LENGTH_HOURS,
+    minute_of_shifted_day,
+    parse_datetime_series_to_reftz,
+    shift_series_by_window_start,
+)
 
 # --- Column aliases & constants ---
 
@@ -89,7 +96,13 @@ def _encode_sparse_hist(hist: np.ndarray) -> str:
 
 # --- Data preparation ---
 
-def _prepare_turnaround_events(df: pd.DataFrame) -> pd.DataFrame:
+def _prepare_turnaround_events(
+    df: pd.DataFrame,
+    *,
+    reftz: str = DEFAULT_REFTZ,
+    window_start_mins: int = 0,
+    window_length_mins: int = DEFAULT_WINDOW_LENGTH_HOURS * 60,
+) -> pd.DataFrame:
     """Build linked turnaround events and keep day_gap >= 0."""
     _require_columns(
         df,
@@ -108,13 +121,21 @@ def _prepare_turnaround_events(df: pd.DataFrame) -> pd.DataFrame:
         df["AC_WAKE"] = "M"
     df["AC_WAKE"] = df["AC_WAKE"].fillna("M").astype(str).str.upper().str.strip()
 
-    df[STD_COL] = pd.to_datetime(df[STD_COL], errors="coerce")
-    df[STA_COL] = pd.to_datetime(df[STA_COL], errors="coerce")
+    df[STD_COL] = parse_datetime_series_to_reftz(df[STD_COL], reftz)
+    df[STA_COL] = parse_datetime_series_to_reftz(df[STA_COL], reftz)
     df = df.dropna(subset=[STD_COL, STA_COL])
+    df["STD_SHIFTED"] = shift_series_by_window_start(df[STD_COL], window_start_mins)
+    df["STA_SHIFTED"] = shift_series_by_window_start(df[STA_COL], window_start_mins)
 
-    df = df.sort_values(by=[AC_REG_COL, STD_COL])
+    if int(window_length_mins) < MINUTES_PER_DAY:
+        dep_mins = minute_of_shifted_day(df["STD_SHIFTED"])
+        df = df[(dep_mins >= 0) & (dep_mins < int(window_length_mins))].copy()
+        if df.empty:
+            return df
+
+    df = df.sort_values(by=[AC_REG_COL, "STD_SHIFTED"])
     grouped = df.groupby(AC_REG_COL, sort=False)
-    df["PREV_STA"] = grouped[STA_COL].shift(1)
+    df["PREV_STA"] = grouped["STA_SHIFTED"].shift(1)
     df["PREV_ARR_STATION"] = grouped[ARR_STATION_COL].shift(1)
     # Previous departure airport = where the aircraft came from before the turnaround.
     df["PREV_DEP_STATION"] = grouped[DEP_STATION_COL].shift(1)
@@ -122,11 +143,11 @@ def _prepare_turnaround_events(df: pd.DataFrame) -> pd.DataFrame:
     df = df.dropna(subset=["PREV_STA", "PREV_ARR_STATION", "PREV_DEP_STATION"])
     df = df[df["PREV_ARR_STATION"] == df[DEP_STATION_COL]]
 
-    df["TA_MINUTES"] = (df[STD_COL] - df["PREV_STA"]).dt.total_seconds() / 60.0
+    df["TA_MINUTES"] = (df["STD_SHIFTED"] - df["PREV_STA"]).dt.total_seconds() / 60.0
     df = df[np.isfinite(df["TA_MINUTES"])]
     df = df[df["TA_MINUTES"] >= 0]
 
-    df["DAY_GAP"] = (df[STD_COL].dt.normalize() - df["PREV_STA"].dt.normalize()).dt.days
+    df["DAY_GAP"] = (df["STD_SHIFTED"].dt.normalize() - df["PREV_STA"].dt.normalize()).dt.days
     df = df[np.isfinite(df["DAY_GAP"])]
     df = df[df["DAY_GAP"].isin([0, 1])]  # Exclude multi-day layovers (maintenance, AOG, etc.)
 
@@ -137,6 +158,10 @@ def _prepare_turnaround_events(df: pd.DataFrame) -> pd.DataFrame:
         ((df["PREV_STA"].dt.hour * 60 + df["PREV_STA"].dt.minute) // BIN_SIZE) * BIN_SIZE
     ).astype(int)
     df["ARR_MINUTE_BIN"] = df["ARR_MINUTE_BIN"] % MINUTES_PER_DAY
+    if int(window_length_mins) < MINUTES_PER_DAY:
+        df = df[df["ARR_MINUTE_BIN"] < int(window_length_mins)].copy()
+        if df.empty:
+            return df
 
     out = pd.DataFrame(
         {
@@ -274,7 +299,12 @@ def analyze_turnaround_distribution(config: PipelineConfig) -> None:
 
     print(f"[Turnaround] Schedule: {config.schedule_file}")
     df = pd.read_csv(config.schedule_file)
-    events = _prepare_turnaround_events(df)
+    events = _prepare_turnaround_events(
+        df,
+        reftz=config.reftz,
+        window_start_mins=config.window_start_mins,
+        window_length_mins=config.window_length_mins,
+    )
 
     print(f"[Turnaround]   Valid turnaround events: {len(events)}")
     cat_counts = events["category"].value_counts().to_dict()

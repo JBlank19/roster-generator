@@ -109,7 +109,7 @@ class TestPrepareFlightsSoftware:
 
     def test_returns_expected_columns(self, prepared_df):
         """Output should contain the derived columns."""
-        for col in ["FLIGHT_MINUTES", "DEP_HOUR_UTC", "FLIGHT_BIN"]:
+        for col in ["FLIGHT_MINUTES", "DEP_HOUR_REFTZ", "FLIGHT_BIN"]:
             assert col in prepared_df.columns
 
     def test_zzz_airline_remapped(self):
@@ -186,8 +186,8 @@ class TestPrepareFlightsPhysical:
 
     def test_departure_hours_valid(self, prepared_df):
         """Departure hour must be in [0, 23]."""
-        assert (prepared_df["DEP_HOUR_UTC"] >= 0).all()
-        assert (prepared_df["DEP_HOUR_UTC"] <= 23).all()
+        assert (prepared_df["DEP_HOUR_REFTZ"] >= 0).all()
+        assert (prepared_df["DEP_HOUR_REFTZ"] <= 23).all()
 
     def test_bins_are_non_negative(self, prepared_df):
         """Flight time bins must be non-negative."""
@@ -212,7 +212,7 @@ class TestBuildHourlyDistributionsSoftware:
     def test_output_columns(self, hourly_dist):
         """Output should have the canonical columns."""
         expected = {"origin_id", "dest_id", "airline_id", "aircraft_wake",
-                    "dep_hour_utc", "flight_time", "probability"}
+                    "dep_hour_reftz", "flight_time", "probability"}
         assert expected == set(hourly_dist.columns)
 
     def test_min_samples_filter(self):
@@ -251,7 +251,7 @@ class TestBuildHourlyDistributionsPhysical:
 
     def test_probabilities_sum_to_one_per_group(self, hourly_dist):
         """Probabilities must sum to 1 within each (origin, dest, airline, wake, hour) group."""
-        group_cols = ["origin_id", "dest_id", "airline_id", "aircraft_wake", "dep_hour_utc"]
+        group_cols = ["origin_id", "dest_id", "airline_id", "aircraft_wake", "dep_hour_reftz"]
         sums = hourly_dist.groupby(group_cols)["probability"].sum()
         np.testing.assert_allclose(sums.values, 1.0, atol=1e-9)
 
@@ -262,8 +262,8 @@ class TestBuildHourlyDistributionsPhysical:
 
     def test_departure_hours_valid(self, hourly_dist):
         """Departure hours in output must be in [0, 23]."""
-        assert (hourly_dist["dep_hour_utc"] >= 0).all()
-        assert (hourly_dist["dep_hour_utc"] <= 23).all()
+        assert (hourly_dist["dep_hour_reftz"] >= 0).all()
+        assert (hourly_dist["dep_hour_reftz"] <= 23).all()
 
     def test_no_self_routes(self, hourly_dist):
         """No row should have origin_id == dest_id (impossible route)."""
@@ -285,7 +285,7 @@ class TestBuildOperatorAgnosticSoftware:
     def test_output_columns(self, agnostic_dist):
         """Output should have the same canonical columns as per-operator."""
         expected = {"origin_id", "dest_id", "airline_id", "aircraft_wake",
-                    "dep_hour_utc", "flight_time", "probability"}
+                    "dep_hour_reftz", "flight_time", "probability"}
         assert expected == set(agnostic_dist.columns)
 
     def test_no_count_or_total_columns_leaked(self, agnostic_dist):
@@ -304,7 +304,7 @@ class TestBuildOperatorAgnosticPhysical:
         """Probabilities must sum to 1 within each (origin, dest, wake, hour) group."""
         if len(agnostic_dist) == 0:
             return
-        group_cols = ["origin_id", "dest_id", "aircraft_wake", "dep_hour_utc"]
+        group_cols = ["origin_id", "dest_id", "aircraft_wake", "dep_hour_reftz"]
         sums = agnostic_dist.groupby(group_cols)["probability"].sum()
         np.testing.assert_allclose(sums.values, 1.0, atol=1e-9)
 
@@ -408,7 +408,7 @@ class TestAnalyzeFlightTimeDistribution:
         analyze_flight_time_distribution(cfg)
         df = pd.read_csv(tmp_path / "analysis" / "scheduled_flight_time.csv")
         expected = ["origin_id", "dest_id", "airline_id", "aircraft_wake",
-                    "dep_hour_utc", "flight_time", "probability"]
+                    "dep_hour_reftz", "flight_time", "probability"]
         assert list(df.columns) == expected
 
     def test_output_contains_both_tiers(self, tmp_path):
@@ -438,7 +438,7 @@ class TestAnalyzeFlightTimeDistribution:
         df = pd.read_csv(tmp_path / "analysis" / "scheduled_flight_time.csv")
         assert (df["probability"] > 0).all()
         assert (df["probability"] <= 1).all()
-        group_cols = ["origin_id", "dest_id", "airline_id", "aircraft_wake", "dep_hour_utc"]
+        group_cols = ["origin_id", "dest_id", "airline_id", "aircraft_wake", "dep_hour_reftz"]
         sums = df.groupby(group_cols)["probability"].sum()
         np.testing.assert_allclose(sums.values, 1.0, atol=1e-9)
 
@@ -452,3 +452,46 @@ class TestAnalyzeFlightTimeDistribution:
         )
         analyze_flight_time_distribution(cfg)
         assert not (tmp_path / "analysis" / "scheduled_flight_time_aggregate.csv").exists()
+
+    def test_non_utc_reftz_rebins_departure_hour(self, tmp_path):
+        """REFTZ conversion should change dep_hour_reftz for near-midnight UTC departures."""
+        flights = [
+            _make_flight("AC001", "IBE", "M", "LEMD", "EGLL", "2023-09-01 22:30", "2023-09-02 00:30"),
+            _make_flight("AC002", "IBE", "M", "LEMD", "EGLL", "2023-09-02 22:30", "2023-09-03 00:30"),
+            _make_flight("AC003", "IBE", "M", "LEMD", "EGLL", "2023-09-03 22:30", "2023-09-04 00:30"),
+        ]
+        schedule_path = self._write_schedule_csv(tmp_path, flights)
+        cfg = PipelineConfig(
+            schedule_file=schedule_path,
+            analysis_dir=tmp_path / "analysis",
+            output_dir=tmp_path / "output",
+            reftz="Europe/Madrid",
+        )
+        analyze_flight_time_distribution(cfg)
+        df = pd.read_csv(tmp_path / "analysis" / "scheduled_flight_time.csv")
+        per_op = df[df["airline_id"] == "IBE"]
+        assert len(per_op) > 0
+        # September in Madrid is UTC+2, so 22:30 UTC -> 00:30 local (hour 0).
+        assert set(per_op["dep_hour_reftz"].astype(int).tolist()) == {0}
+
+    def test_window_start_shifts_hour_bin(self, tmp_path):
+        """WINDOW_START should shift early departures into previous-day late hours."""
+        flights = [
+            _make_flight("AC001", "IBE", "M", "LEMD", "EGLL", "2023-09-01 05:30", "2023-09-01 07:30"),
+            _make_flight("AC002", "IBE", "M", "LEMD", "EGLL", "2023-09-02 05:30", "2023-09-02 07:30"),
+            _make_flight("AC003", "IBE", "M", "LEMD", "EGLL", "2023-09-03 05:30", "2023-09-03 07:30"),
+        ]
+        schedule_path = self._write_schedule_csv(tmp_path, flights)
+        cfg = PipelineConfig(
+            schedule_file=schedule_path,
+            analysis_dir=tmp_path / "analysis",
+            output_dir=tmp_path / "output",
+            reftz="UTC",
+            window_start="06:00",
+        )
+        analyze_flight_time_distribution(cfg)
+        df = pd.read_csv(tmp_path / "analysis" / "scheduled_flight_time.csv")
+        per_op = df[df["airline_id"] == "IBE"]
+        assert len(per_op) > 0
+        # 05:30 shifted by -6h -> 23:30 previous day, hour bin 23.
+        assert set(per_op["dep_hour_reftz"].astype(int).tolist()) == {23}

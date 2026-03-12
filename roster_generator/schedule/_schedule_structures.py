@@ -4,12 +4,12 @@ from typing import List
 
 @dataclass
 class Flight:
-    """One scheduled leg in minutes-from-midnight UTC."""
+    """One scheduled leg in REFTZ window-relative minutes."""
 
     orig: str
     dest: str
-    std: int  # scheduled departure UTC minutes
-    sta: int  # scheduled arrival UTC minutes
+    std: int  # scheduled departure REFTZ-window minutes
+    sta: int  # scheduled arrival REFTZ-window minutes
     turnaround_to_next_category: str = ""
     turnaround_to_next_minutes: int = -1
 

@@ -13,7 +13,7 @@ The public entry point ``generate_markov`` orchestrates both the Markov build
 and the initial condition sampling (delegated to ``InitialConditionModel``).
 
 Outputs:
-  - markov{suffix}.csv
+  - markov{suffix}.csv (DEP_HOUR_REFTZ)
   - initial_conditions{suffix}.csv
   - phys_ta{suffix}.csv
 """
@@ -26,6 +26,14 @@ import numpy as np
 import pandas as pd
 
 from roster_generator.config import PipelineConfig
+from roster_generator.time_window import (
+    DEFAULT_REFTZ,
+    DEFAULT_WINDOW_LENGTH_HOURS,
+    hour_of_shifted_day,
+    minute_of_shifted_day,
+    parse_datetime_series_to_reftz,
+    shift_series_by_window_start,
+)
 from .initial_conditions import InitialConditionModel
 
 # --- Column aliases ---
@@ -58,7 +66,14 @@ def _require_columns(df: pd.DataFrame, required: list[str], label: str) -> None:
 
 # --- Data preparation ---
 
-def _prepare_base_flights(df, airline_filter=None):
+def _prepare_base_flights(
+    df,
+    airline_filter=None,
+    *,
+    reftz: str = DEFAULT_REFTZ,
+    window_start_mins: int = 0,
+    window_length_mins: int = DEFAULT_WINDOW_LENGTH_HOURS * 60,
+):
     """Normalise raw schedule columns, apply filters, and drop unusable rows.
 
     Handles the "ZZZ" sentinel airline (remaps to AC_REG), defaults missing
@@ -87,9 +102,19 @@ def _prepare_base_flights(df, airline_filter=None):
     if AC_WAKE_COL in df.columns:
         df[AC_WAKE_COL] = df[AC_WAKE_COL].str.upper()
 
-    df["STD"] = pd.to_datetime(df[STD_COL], errors="coerce")
-    df["STA"] = pd.to_datetime(df[STA_COL], errors="coerce")
+    df["STD"] = parse_datetime_series_to_reftz(df[STD_COL], reftz)
+    df["STA"] = parse_datetime_series_to_reftz(df[STA_COL], reftz)
     df = df.dropna(subset=["STD", "STA"])
+    df["STD"] = shift_series_by_window_start(df["STD"], window_start_mins)
+    df["STA"] = shift_series_by_window_start(df["STA"], window_start_mins)
+
+    if int(window_length_mins) < 24 * 60:
+        std_mins = minute_of_shifted_day(df["STD"])
+        df = df[(std_mins >= 0) & (std_mins < int(window_length_mins))].copy()
+        if df.empty:
+            raise ValueError("No usable flights inside configured REFTZ window.")
+
+    df["DEP_HOUR_REFTZ"] = hour_of_shifted_day(df["STD"]).astype(int)
 
     if airline_filter:
         af = str(airline_filter).strip().upper()
@@ -118,17 +143,18 @@ def _build_markov_tables(base_df):
 
     # Previous departure airport within each aircraft's chain
     df["PREV_ICAO"] = df.groupby(AC_REG_COL, sort=False)[DEP_COL].shift(1)
-    df["DEP_HOUR_UTC"] = df["STD"].dt.hour
+    if "DEP_HOUR_REFTZ" not in df.columns:
+        df["DEP_HOUR_REFTZ"] = df["STD"].dt.hour
 
     # --- Primary table: conditioned on previous origin ---
     primary_df = df[df["PREV_ICAO"].notna()].copy()
     markov_grp = (
-        primary_df.groupby([AIRLINE_COL, AC_WAKE_COL, "PREV_ICAO", DEP_COL, ARR_COL, "DEP_HOUR_UTC"], sort=False)
+        primary_df.groupby([AIRLINE_COL, AC_WAKE_COL, "PREV_ICAO", DEP_COL, ARR_COL, "DEP_HOUR_REFTZ"], sort=False)
         .size()
         .reset_index(name="COUNT")
     )
 
-    totals = markov_grp.groupby([AIRLINE_COL, AC_WAKE_COL, "PREV_ICAO", DEP_COL, "DEP_HOUR_UTC"])["COUNT"].transform("sum")
+    totals = markov_grp.groupby([AIRLINE_COL, AC_WAKE_COL, "PREV_ICAO", DEP_COL, "DEP_HOUR_REFTZ"])["COUNT"].transform("sum")
     markov_grp["PROB"] = markov_grp["COUNT"] / totals
 
     final_markov = markov_grp[[
@@ -137,7 +163,7 @@ def _build_markov_tables(base_df):
         "PREV_ICAO",
         DEP_COL,
         ARR_COL,
-        "DEP_HOUR_UTC",
+        "DEP_HOUR_REFTZ",
         "PROB",
         "COUNT",
     ]].copy()
@@ -152,7 +178,7 @@ def _build_markov_tables(base_df):
         prev = str(row.PREV_ICAO)
         dep = str(row.DEP_ICAO)
         arr = str(row.ARR_ICAO)
-        hour = int(row.DEP_HOUR_UTC)
+        hour = int(row.DEP_HOUR_REFTZ)
         cnt = int(row.COUNT)
 
         pkey = (op, wake, prev, dep)
@@ -164,7 +190,7 @@ def _build_markov_tables(base_df):
 
     # --- Fallback table: origin-only (no previous-origin conditioning) ---
     fallback_grp = (
-        df.groupby([AIRLINE_COL, AC_WAKE_COL, DEP_COL, ARR_COL, "DEP_HOUR_UTC"], sort=False)
+        df.groupby([AIRLINE_COL, AC_WAKE_COL, DEP_COL, ARR_COL, "DEP_HOUR_REFTZ"], sort=False)
         .size()
         .reset_index(name="COUNT")
     )
@@ -174,7 +200,7 @@ def _build_markov_tables(base_df):
         wake = str(row.AC_WAKE)
         dep = str(row.DEP_ICAO)
         arr = str(row.ARR_ICAO)
-        hour = int(row.DEP_HOUR_UTC)
+        hour = int(row.DEP_HOUR_REFTZ)
         cnt = int(row.COUNT)
 
         fkey = (op, wake, dep)
@@ -230,14 +256,24 @@ def generate_markov(config: PipelineConfig, airline_filter: str | None = None) -
     df = pd.read_csv(config.schedule_file)
     print(f"[Markov] Schedule: {config.schedule_file}")
 
-    base_df = _prepare_base_flights(df, airline_filter=airline_filter)
+    base_df = _prepare_base_flights(
+        df,
+        airline_filter=airline_filter,
+        reftz=config.reftz,
+        window_start_mins=config.window_start_mins,
+        window_length_mins=config.window_length_mins,
+    )
     print(f"[Markov]   {base_df[AC_REG_COL].nunique()} unique aircraft in normalized schedule")
 
     # Step 1: Markov transitions
     final_markov, markov_hourly, markov_fallback_hourly = _build_markov_tables(base_df)
 
     # Step 2: Initial conditions (needs Markov tables for destination sampling)
-    model = InitialConditionModel(base_df, seed=seed)
+    model = InitialConditionModel(
+        base_df,
+        seed=seed,
+        window_length_mins=config.window_length_mins,
+    )
     model.build_all()
     model.set_markov_tables(markov_hourly, markov_fallback_hourly)
 
@@ -257,7 +293,7 @@ def generate_markov(config: PipelineConfig, airline_filter: str | None = None) -
     phys_ta_df = model.phys_ta_df.sort_values(["airline_id", "aircraft_wake"]).reset_index(drop=True)
     phys_ta_df.to_csv(phys_ta_path, index=False)
 
-    prior_rows = int(ic_df["PRIOR_STD_UTC_MINS"].notna().sum())
+    prior_rows = int(ic_df["PRIOR_STD_REFTZ_MINS"].notna().sum())
     prior_only_rows = int((ic_df["PRIOR_ONLY"].astype(int) == 1).sum())
     single_flights = int(ic_df["SINGLE_FLIGHT"].fillna(0).astype(int).sum())
 

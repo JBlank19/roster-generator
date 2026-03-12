@@ -28,6 +28,7 @@ class DataManager:
         markov_path: Path,
         turnaround_intraday_params_path: Path,
         turnaround_temporal_profile_path: Path,
+        window_length_mins: int = END_OF_DAY_MINS,
     ):
         self.rng = rng
         self.routes_path = routes_path
@@ -35,6 +36,8 @@ class DataManager:
         self.markov_path = markov_path
         self.turnaround_intraday_params_path = turnaround_intraday_params_path
         self.turnaround_temporal_profile_path = turnaround_temporal_profile_path
+        self.window_length_mins = int(window_length_mins)
+        self.hour_bins = max(1, self.window_length_mins // P_NEXT_BIN_SIZE_MINS)
 
         self.turnaround_lookup_stats: Dict[str, int] = defaultdict(int)
         self._load_all()
@@ -44,6 +47,7 @@ class DataManager:
         print("[Schedule] Loading data...")
         print(f"[Schedule]   Routes: {self.routes_path}")
         print(f"[Schedule]   Airports: {self.airports_path}")
+        print(f"[Schedule]   Window length mins: {self.window_length_mins}")
 
         self._load_markov_data()
         self._load_turnaround_data()
@@ -93,12 +97,8 @@ class DataManager:
         origins = markov_df["DEP_ICAO"].to_numpy(dtype=object)
         destinations = markov_df["ARR_ICAO"].to_numpy(dtype=object)
         counts = markov_df["COUNT"].astype(int).to_numpy()
-        dep_hours = (
-            pd.to_numeric(markov_df["DEP_HOUR_UTC"], errors="coerce")
-            .fillna(12)
-            .astype(int)
-            .to_numpy()
-        )
+        dep_hour_col = "DEP_HOUR_REFTZ" if "DEP_HOUR_REFTZ" in markov_df.columns else "DEP_HOUR_UTC"
+        dep_hours = pd.to_numeric(markov_df[dep_hour_col], errors="coerce").fillna(12).astype(int).to_numpy()
 
         for index in range(len(operators)):
             primary_key = (
@@ -330,7 +330,7 @@ class DataManager:
         next_day_counts: Dict[int, float],
     ) -> np.ndarray:
         """Build empirical hourly p(next_day) from aggregated 5-minute counts."""
-        n_bins = END_OF_DAY_MINS // P_NEXT_BIN_SIZE_MINS
+        n_bins = self.hour_bins
         intra_hourly = np.zeros(n_bins, dtype=float)
         next_hourly = np.zeros(n_bins, dtype=float)
 
@@ -370,9 +370,13 @@ class DataManager:
             except Exception:
                 self.tz_offset[airport] = 0
 
+    def get_reftz_hour(self, reftz_mins: int) -> int:
+        """Convert minute-of-window to REFTZ hour bin."""
+        return (int(reftz_mins) // 60) % self.hour_bins
+
     def get_utc_hour(self, utc_mins: int) -> int:
-        """Convert minute-of-day to UTC hour [0, 23]."""
-        return (utc_mins // 60) % 24
+        """Backward-compatible alias kept for tests/callers."""
+        return self.get_reftz_hour(utc_mins)
 
     # ---------------------------------------------------------
     # Markov Lookup
@@ -393,11 +397,11 @@ class DataManager:
         candidates = [center_hour]
         for radius in range(1, max_radius + 1):
             if self.rng.random() < 0.5:
-                candidates.append((center_hour - radius) % 24)
-                candidates.append((center_hour + radius) % 24)
+                candidates.append((center_hour - radius) % self.hour_bins)
+                candidates.append((center_hour + radius) % self.hour_bins)
             else:
-                candidates.append((center_hour + radius) % 24)
-                candidates.append((center_hour - radius) % 24)
+                candidates.append((center_hour + radius) % self.hour_bins)
+                candidates.append((center_hour - radius) % self.hour_bins)
 
         for hour in candidates:
             if hour in hourly_data:
@@ -425,7 +429,7 @@ class DataManager:
 
         primary_key = (op, wake, prev_origin, origin)
         fallback_key = (op, wake, origin)
-        dep_hour = self.get_utc_hour(dep_utc_mins)
+        dep_hour = self.get_reftz_hour(dep_utc_mins)
 
         dest_counts, found_hour = self._find_hourly_data_with_radius(
             self.markov_hourly,
@@ -507,7 +511,7 @@ class DataManager:
 
     def _build_next_day_turnaround(self, arr_utc_mins: int) -> int:
         """Compute turnaround that delays departure to next day."""
-        min_needed = max(BIN_SIZE_MINS, END_OF_DAY_MINS - int(arr_utc_mins) + BIN_SIZE_MINS)
+        min_needed = max(BIN_SIZE_MINS, self.window_length_mins - int(arr_utc_mins) + BIN_SIZE_MINS)
         return int(math.ceil(min_needed / BIN_SIZE_MINS) * BIN_SIZE_MINS)
 
     def get_turnaround_category(
@@ -523,7 +527,7 @@ class DataManager:
         if p_next_by_bin is None:
             return "missing"
 
-        hour_idx = (int(arr_utc_mins) % END_OF_DAY_MINS) // P_NEXT_BIN_SIZE_MINS
+        hour_idx = (int(arr_utc_mins) % self.window_length_mins) // P_NEXT_BIN_SIZE_MINS
         p_next = float(p_next_by_bin[hour_idx])
         return "next_day" if self.rng.random() < p_next else "intraday"
 
@@ -549,7 +553,7 @@ class DataManager:
 
         location, shape = self.turnaround_intraday_params[key]
 
-        max_intraday = END_OF_DAY_MINS - int(arr_utc_mins) - BIN_SIZE_MINS
+        max_intraday = self.window_length_mins - int(arr_utc_mins) - BIN_SIZE_MINS
         max_intraday = int(math.floor(max_intraday / BIN_SIZE_MINS) * BIN_SIZE_MINS)
         if max_intraday < BIN_SIZE_MINS:
             return self._build_next_day_turnaround(arr_utc_mins), "next_day"

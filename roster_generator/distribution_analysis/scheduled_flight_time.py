@@ -1,8 +1,8 @@
 """
-Scheduled Flight Time Distributions (Hourly, UTC)
+Scheduled Flight Time Distributions (Hourly, REFTZ)
 
 Builds hourly flight-duration probability tables from historical schedule data.
-Each route is stratified by departure hour (UTC) to capture time-of-day patterns.
+Each route is stratified by departure hour (REFTZ) to capture time-of-day patterns.
 
 Two tiers are produced in a single output file:
   - Per-operator:      P(duration | origin, dest, airline, wake, hour)
@@ -10,7 +10,7 @@ Two tiers are produced in a single output file:
 
 Output:
   - scheduled_flight_time{suffix}.csv
-      columns: origin_id, dest_id, airline_id, aircraft_wake, dep_hour_utc,
+      columns: origin_id, dest_id, airline_id, aircraft_wake, dep_hour_reftz,
                flight_time, probability
 """
 
@@ -23,6 +23,14 @@ import numpy as np
 import pandas as pd
 
 from roster_generator.config import PipelineConfig
+from roster_generator.time_window import (
+    DEFAULT_REFTZ,
+    DEFAULT_WINDOW_LENGTH_HOURS,
+    hour_of_shifted_day,
+    minute_of_shifted_day,
+    parse_datetime_series_to_reftz,
+    shift_series_by_window_start,
+)
 
 # --- Column aliases & constants ---
 
@@ -46,7 +54,13 @@ def _require_columns(df: pd.DataFrame, required: list[str], label: str) -> None:
 
 # --- Data preparation ---
 
-def _prepare_flights(df: pd.DataFrame) -> pd.DataFrame:
+def _prepare_flights(
+    df: pd.DataFrame,
+    *,
+    reftz: str = DEFAULT_REFTZ,
+    window_start_mins: int = 0,
+    window_length_mins: int = DEFAULT_WINDOW_LENGTH_HOURS * 60,
+) -> pd.DataFrame:
     """Normalise columns, remap ZZZ airlines, compute flight duration and bins."""
     _require_columns(
         df,
@@ -67,17 +81,25 @@ def _prepare_flights(df: pd.DataFrame) -> pd.DataFrame:
         df["AC_WAKE"] = "M"
     df["AC_WAKE"] = df["AC_WAKE"].fillna("M").astype(str).str.upper().str.strip()
 
-    # Parse times
-    df[STD_COL] = pd.to_datetime(df[STD_COL], errors="coerce")
-    df[STA_COL] = pd.to_datetime(df[STA_COL], errors="coerce")
+    # Parse times in REFTZ and shift so window start maps to minute 0.
+    df[STD_COL] = parse_datetime_series_to_reftz(df[STD_COL], reftz)
+    df[STA_COL] = parse_datetime_series_to_reftz(df[STA_COL], reftz)
     df = df.dropna(subset=[STD_COL, STA_COL])
+    df["STD_SHIFTED"] = shift_series_by_window_start(df[STD_COL], window_start_mins)
+    df["STA_SHIFTED"] = shift_series_by_window_start(df[STA_COL], window_start_mins)
+
+    if int(window_length_mins) < 24 * 60:
+        dep_mins = minute_of_shifted_day(df["STD_SHIFTED"])
+        df = df[(dep_mins >= 0) & (dep_mins < int(window_length_mins))].copy()
+        if df.empty:
+            return df
 
     # Flight duration
-    df["FLIGHT_MINUTES"] = (df[STA_COL] - df[STD_COL]).dt.total_seconds() / 60.0
+    df["FLIGHT_MINUTES"] = (df["STA_SHIFTED"] - df["STD_SHIFTED"]).dt.total_seconds() / 60.0
     df = df[df["FLIGHT_MINUTES"] > 0]
 
     # Departure hour and duration bin
-    df["DEP_HOUR_UTC"] = df[STD_COL].dt.hour
+    df["DEP_HOUR_REFTZ"] = hour_of_shifted_day(df["STD_SHIFTED"]).astype(int)
     df["FLIGHT_BIN"] = (np.round(df["FLIGHT_MINUTES"] / BIN_SIZE) * BIN_SIZE).astype(int)
 
     return df
@@ -87,7 +109,7 @@ def _prepare_flights(df: pd.DataFrame) -> pd.DataFrame:
 
 def _build_hourly_distributions(df: pd.DataFrame) -> pd.DataFrame:
     """Per-operator: P(duration | origin, dest, operator, wake, hour)."""
-    group_cols = [DEP_STATION_COL, ARR_STATION_COL, AIRLINE_COL, "AC_WAKE", "DEP_HOUR_UTC"]
+    group_cols = [DEP_STATION_COL, ARR_STATION_COL, AIRLINE_COL, "AC_WAKE", "DEP_HOUR_REFTZ"]
 
     counts = df.groupby(group_cols + ["FLIGHT_BIN"]).size().reset_index(name="COUNT")
     counts["TOTAL"] = counts.groupby(group_cols)["COUNT"].transform("sum")
@@ -99,14 +121,14 @@ def _build_hourly_distributions(df: pd.DataFrame) -> pd.DataFrame:
         ARR_STATION_COL: "dest_id",
         AIRLINE_COL: "airline_id",
         "AC_WAKE": "aircraft_wake",
-        "DEP_HOUR_UTC": "dep_hour_utc",
+        "DEP_HOUR_REFTZ": "dep_hour_reftz",
         "FLIGHT_BIN": "flight_time",
     }).drop(columns=["COUNT", "TOTAL"])
 
 
 def _build_operator_agnostic_distributions(df: pd.DataFrame) -> pd.DataFrame:
     """Operator-agnostic: P(duration | origin, dest, ALL, wake, hour)."""
-    group_cols = [DEP_STATION_COL, ARR_STATION_COL, "AC_WAKE", "DEP_HOUR_UTC"]
+    group_cols = [DEP_STATION_COL, ARR_STATION_COL, "AC_WAKE", "DEP_HOUR_REFTZ"]
 
     counts = df.groupby(group_cols + ["FLIGHT_BIN"]).size().reset_index(name="COUNT")
     counts["TOTAL"] = counts.groupby(group_cols)["COUNT"].transform("sum")
@@ -119,7 +141,7 @@ def _build_operator_agnostic_distributions(df: pd.DataFrame) -> pd.DataFrame:
         ARR_STATION_COL: "dest_id",
         AIRLINE_COL: "airline_id",
         "AC_WAKE": "aircraft_wake",
-        "DEP_HOUR_UTC": "dep_hour_utc",
+        "DEP_HOUR_REFTZ": "dep_hour_reftz",
         "FLIGHT_BIN": "flight_time",
     }).drop(columns=["COUNT", "TOTAL"])
 
@@ -150,7 +172,12 @@ def analyze_flight_time_distribution(config: PipelineConfig) -> None:
 
     print(f"[FlightTime] Schedule: {config.schedule_file}")
     df = pd.read_csv(config.schedule_file)
-    df = _prepare_flights(df)
+    df = _prepare_flights(
+        df,
+        reftz=config.reftz,
+        window_start_mins=config.window_start_mins,
+        window_length_mins=config.window_length_mins,
+    )
 
     if df.empty:
         raise ValueError("No valid flights after normalisation.")

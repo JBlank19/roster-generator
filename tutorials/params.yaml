@@ -1,0 +1,5 @@
+# Optional runtime window configuration.
+# Missing file/keys fall back to defaults.
+REFTZ: UTC
+WINDOW_START: "00:00"
+WINDOW_LENGTH_HOURS: 24

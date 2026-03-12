@@ -3,7 +3,7 @@ import random
 from typing import List, Tuple
 
 from ._schedule_capacity import CapacityTracker
-from ._schedule_data_manager import BIN_SIZE_MINS, END_OF_DAY_MINS, DataManager
+from ._schedule_data_manager import BIN_SIZE_MINS, DataManager
 from ._schedule_stats import GenerationStats
 from ._schedule_structures import Aircraft, Flight
 
@@ -22,6 +22,7 @@ class ScheduleGenerator:
         self.tracker = tracker
         self.stats = stats
         self.rng = rng
+        self.window_length_mins = int(data.window_length_mins)
 
     def _clone_flight(self, flight: Flight) -> Flight:
         """Create a detached copy of a flight object."""
@@ -54,8 +55,8 @@ class ScheduleGenerator:
             max_ta = max(scheduled_times)
         else:
             min_ta = BIN_SIZE_MINS
-            max_ta = END_OF_DAY_MINS - int(max(0, arrival_time)) + BIN_SIZE_MINS
-            max_ta = max(BIN_SIZE_MINS, min(max_ta, END_OF_DAY_MINS - BIN_SIZE_MINS))
+            max_ta = self.window_length_mins - int(max(0, arrival_time)) + BIN_SIZE_MINS
+            max_ta = max(BIN_SIZE_MINS, min(max_ta, self.window_length_mins - BIN_SIZE_MINS))
             ta_options = []
 
         candidates: List[Tuple[int, str, float]] = []
@@ -82,7 +83,7 @@ class ScheduleGenerator:
                 candidates.append((ta_time, "interval", 0.0))
                 seen.add(ta_time)
 
-        for ta_time in range(max_ta + 5, END_OF_DAY_MINS, 5):
+        for ta_time in range(max_ta + 5, self.window_length_mins, 5):
             if ta_time not in seen:
                 candidates.append((ta_time, "extended", 0.0))
                 seen.add(ta_time)
@@ -164,7 +165,7 @@ class ScheduleGenerator:
         if len(aircraft.chain) == 1:
             self.stats.single_flight_end_of_day += 1
             self.stats.single_flight_total += 1
-            term_hour = (scheduled_departure_time // 60) % 24
+            term_hour = (scheduled_departure_time // 60) % max(1, self.window_length_mins // 60)
             self.stats.single_flight_termination_hours[term_hour] += 1
 
     def _record_no_destination(
@@ -232,7 +233,7 @@ class ScheduleGenerator:
                 continue
 
             scheduled_arrival_time = scheduled_departure_time + flight_time
-            if scheduled_arrival_time < END_OF_DAY_MINS:
+            if scheduled_arrival_time < self.window_length_mins:
                 available = self.tracker.check_availability(
                     current_airport,
                     destination,
@@ -255,10 +256,10 @@ class ScheduleGenerator:
             )
             aircraft.chain.append(new_flight)
 
-            if scheduled_arrival_time < END_OF_DAY_MINS:
+            if scheduled_arrival_time < self.window_length_mins:
                 self.tracker.add_flight(new_flight)
 
-            if scheduled_arrival_time >= END_OF_DAY_MINS:
+            if scheduled_arrival_time >= self.window_length_mins:
                 self.stats.end_of_day += 1
 
             return True, None, destination, scheduled_arrival_time
@@ -306,7 +307,7 @@ class ScheduleGenerator:
         prev_origin = last_flight.orig
         arrival_time = last_flight.sta
 
-        while arrival_time < END_OF_DAY_MINS:
+        while arrival_time < self.window_length_mins:
             anchor_flight = aircraft.chain[-1] if aircraft.chain else None
 
             turnaround_time, ta_category = self._sample_turnaround(
@@ -325,7 +326,7 @@ class ScheduleGenerator:
                 break
 
             scheduled_departure_time = self._compute_next_std(arrival_time, turnaround_time)
-            if ta_category == "next_day" or scheduled_departure_time >= END_OF_DAY_MINS:
+            if ta_category == "next_day" or scheduled_departure_time >= self.window_length_mins:
                 self._record_end_of_day(
                     aircraft,
                     turnaround_time,

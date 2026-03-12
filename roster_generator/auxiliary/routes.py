@@ -18,6 +18,7 @@ from pathlib import Path
 import pandas as pd
 
 from roster_generator.config import PipelineConfig
+from roster_generator.time_window import DEFAULT_REFTZ, parse_datetime_series_to_reftz
 
 # --- Column aliases ---
 
@@ -42,7 +43,7 @@ def _require_columns(df: pd.DataFrame, required: list[str], label: str) -> None:
         raise ValueError(f"Missing required columns in {label}: {missing}")
 
 
-def _prepare_flights(df: pd.DataFrame) -> pd.DataFrame:
+def _prepare_flights(df: pd.DataFrame, reftz: str = DEFAULT_REFTZ) -> pd.DataFrame:
     """Normalise columns, remap ZZZ airlines, compute flight durations."""
     _require_columns(
         df,
@@ -65,7 +66,7 @@ def _prepare_flights(df: pd.DataFrame) -> pd.DataFrame:
 
     # Parse times (scheduled + actual)
     for col in [STD_COL, STA_COL, ATD_COL, ATA_COL]:
-        df[col] = pd.to_datetime(df[col], errors="coerce")
+        df[col] = parse_datetime_series_to_reftz(df[col], reftz)
 
     df = df.dropna(subset=[STD_COL, STA_COL, ATD_COL, ATA_COL])
 
@@ -156,7 +157,7 @@ def generate_routes(config: PipelineConfig) -> None:
     # 2. Load and prepare schedule
     print(f"[Routes] Schedule: {config.schedule_file}")
     df = pd.read_csv(config.schedule_file)
-    df = _prepare_flights(df)
+    df = _prepare_flights(df, reftz=config.reftz)
 
     if df.empty:
         raise ValueError("No valid flights after normalisation.")

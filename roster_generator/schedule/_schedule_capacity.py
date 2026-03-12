@@ -13,10 +13,16 @@ DEFAULT_CAPACITY = 999
 class CapacityTracker:
     """Track airport burst and rolling-window capacity during schedule generation."""
 
-    def __init__(self, rolling_capacities: Dict[str, float], burst_capacities: Dict[str, float]):
+    def __init__(
+        self,
+        rolling_capacities: Dict[str, float],
+        burst_capacities: Dict[str, float],
+        window_length_mins: int = END_OF_DAY_MINS,
+    ):
         self.rolling_cap = rolling_capacities
         self.burst_cap = burst_capacities
-        self.num_bins = END_OF_DAY_MINS // BIN_SIZE_MINS
+        self.window_length_mins = int(window_length_mins)
+        self.num_bins = max(1, self.window_length_mins // BIN_SIZE_MINS)
 
         self.dep_slots: Dict[str, Dict[int, int]] = defaultdict(lambda: defaultdict(int))
         self.arr_slots: Dict[str, Dict[int, int]] = defaultdict(lambda: defaultdict(int))
@@ -51,7 +57,10 @@ class CapacityTracker:
 
     def check_availability(self, origin: str, destination: str, std_mins: int, sta_mins: int) -> bool:
         """Check whether origin departure and destination arrival can be accommodated."""
-        if not (0 <= std_mins < END_OF_DAY_MINS and 0 <= sta_mins < END_OF_DAY_MINS):
+        if not (
+            0 <= std_mins < self.window_length_mins
+            and 0 <= sta_mins < self.window_length_mins
+        ):
             return True
 
         if not self._check_airport_availability(origin, std_mins, is_departure=True):
@@ -72,9 +81,9 @@ class CapacityTracker:
 
     def add_flight(self, flight: Flight) -> None:
         """Register a flight in capacity counters."""
-        if 0 <= flight.std < END_OF_DAY_MINS:
+        if 0 <= flight.std < self.window_length_mins:
             self._update_movement_counts(flight.orig, flight.std, is_departure=True)
-        if 0 <= flight.sta < END_OF_DAY_MINS:
+        if 0 <= flight.sta < self.window_length_mins:
             self._update_movement_counts(flight.dest, flight.sta, is_departure=False)
 
     def compute_violations(self) -> Tuple[int, int]:

@@ -101,13 +101,13 @@ def test_sample_initial_conditions_schema_and_unique_regs(prepared_df, markov_ta
         "PRIOR_ONLY",
         "ORIGIN",
         "DEST",
-        "STD_UTC_MINS",
-        "STA_UTC_MINS",
+        "STD_REFTZ_MINS",
+        "STA_REFTZ_MINS",
         "SINGLE_FLIGHT",
         "PRIOR_ORIGIN",
         "PRIOR_DEST",
-        "PRIOR_STD_UTC_MINS",
-        "PRIOR_STA_UTC_MINS",
+        "PRIOR_STD_REFTZ_MINS",
+        "PRIOR_STA_REFTZ_MINS",
     ]
     assert list(ic_df.columns) == expected_cols
     assert not ic_df["AC_REG"].duplicated().any()
@@ -120,7 +120,7 @@ def test_prior_std_negative_when_present(prepared_df, markov_tables):
     np.random.seed(11)
     ic_df = model.sample_initial_conditions()
 
-    prior_std = ic_df["PRIOR_STD_UTC_MINS"].dropna().astype(float)
+    prior_std = ic_df["PRIOR_STD_REFTZ_MINS"].dropna().astype(float)
     if not prior_std.empty:
         assert (prior_std < 0).all()
 
@@ -136,8 +136,8 @@ def test_prior_only_rows_have_blank_or_null_first_flight(prepared_df, markov_tab
     if prior_only.any():
         assert (ic_df.loc[prior_only, "ORIGIN"].astype(str) == "").all()
         assert (ic_df.loc[prior_only, "DEST"].astype(str) == "").all()
-        assert ic_df.loc[prior_only, "STD_UTC_MINS"].isna().all()
-        assert ic_df.loc[prior_only, "STA_UTC_MINS"].isna().all()
+        assert ic_df.loc[prior_only, "STD_REFTZ_MINS"].isna().all()
+        assert ic_df.loc[prior_only, "STA_REFTZ_MINS"].isna().all()
         assert (ic_df.loc[prior_only, "SINGLE_FLIGHT"].astype(int) == 0).all()
 
 
@@ -149,12 +149,12 @@ def test_turnaround_constraint_holds(prepared_df, markov_tables):
     ic_df = model.sample_initial_conditions()
 
     rows = ic_df[
-        (ic_df["PRIOR_STD_UTC_MINS"].notna())
+        (ic_df["PRIOR_STD_REFTZ_MINS"].notna())
         & (ic_df["PRIOR_ONLY"].astype(int) != 1)
     ]
     for row in rows.itertuples(index=False):
         min_ta = model._get_phys_ta_min(str(row.AC_OPER), str(row.AC_WAKE))
-        assert int(row.STD_UTC_MINS) - int(row.PRIOR_STA_UTC_MINS) >= min_ta
+        assert int(row.STD_REFTZ_MINS) - int(row.PRIOR_STA_REFTZ_MINS) >= min_ta
 
 
 def test_markov_fallback_path_works_with_empty_primary(prepared_df, markov_tables):

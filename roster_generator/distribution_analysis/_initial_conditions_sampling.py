@@ -9,7 +9,6 @@ import pandas as pd
 
 from ._initial_conditions_builders import get_phys_ta_min
 from ._initial_conditions_types import (
-    END_OF_DAY,
     P_NEXT_BIN_SIZE,
     InitialConditionState,
     SyntheticAircraft,
@@ -95,6 +94,7 @@ def _find_hourly_data_with_radius(
     hourly_data: dict[int, dict[str, int]],
     center_hour: int,
     rng: random.Random,
+    hour_bins: int,
     max_radius: int = 2,
 ) -> tuple[dict[str, int], int]:
     """Find hourly data at center hour or nearby hours (randomized direction)."""
@@ -104,11 +104,11 @@ def _find_hourly_data_with_radius(
     candidates = [center_hour]
     for radius in range(1, max_radius + 1):
         if rng.random() < 0.5:
-            candidates.append((center_hour - radius) % 24)
-            candidates.append((center_hour + radius) % 24)
+            candidates.append((center_hour - radius) % hour_bins)
+            candidates.append((center_hour + radius) % hour_bins)
         else:
-            candidates.append((center_hour + radius) % 24)
-            candidates.append((center_hour - radius) % 24)
+            candidates.append((center_hour + radius) % hour_bins)
+            candidates.append((center_hour - radius) % hour_bins)
 
     for hour in candidates:
         if hour in hourly_data:
@@ -133,7 +133,7 @@ def _get_markov_destinations(
     dep_utc_mins: int,
 ) -> list[tuple[str, float]]:
     """Query Markov tables for destination probabilities at a departure hour."""
-    dep_hour = (int(dep_utc_mins) // 60) % 24
+    dep_hour = (int(dep_utc_mins) // 60) % int(state.hour_bins)
 
     fallback_key = (op, wake, origin)
 
@@ -141,11 +141,21 @@ def _get_markov_destinations(
     if prev_origin:
         primary_key = (op, wake, prev_origin, origin)
         hourly_data = state.markov_hourly.get(primary_key, {})
-        counts, _ = _find_hourly_data_with_radius(hourly_data, dep_hour, rng)
+        counts, _ = _find_hourly_data_with_radius(
+            hourly_data,
+            dep_hour,
+            rng,
+            hour_bins=state.hour_bins,
+        )
 
     if not counts:
         fb_hourly_data = state.markov_fallback_hourly.get(fallback_key, {})
-        counts, _ = _find_hourly_data_with_radius(fb_hourly_data, dep_hour, rng)
+        counts, _ = _find_hourly_data_with_radius(
+            fb_hourly_data,
+            dep_hour,
+            rng,
+            hour_bins=state.hour_bins,
+        )
 
     if not counts:
         return []
@@ -327,7 +337,8 @@ def _sample_first_destination(
     if not dest_probs:
         raise ValueError(
             f"No first destination available from Markov for airline={ac.airline}, wake={ac.wake}, "
-            f"prev_origin={prev_origin}, origin={ac.origin}, dep_hour={(first_std_mins // 60) % 24}"
+            f"prev_origin={prev_origin}, origin={ac.origin}, "
+            f"dep_hour={(first_std_mins // 60) % int(state.hour_bins)}"
         )
 
     return _weighted_choice_from_pairs(dest_probs, rng)
@@ -349,7 +360,10 @@ def _sample_single_flight_flag(
     first_sta_mins: int,
 ) -> int:
     """Bernoulli draw: does this aircraft stop after one flight (next-day pattern)?"""
-    hour = (int(first_sta_mins) % END_OF_DAY) // P_NEXT_BIN_SIZE
+    if int(first_sta_mins) >= int(state.window_length_mins):
+        return 1
+
+    hour = (int(first_sta_mins) % int(state.window_length_mins)) // P_NEXT_BIN_SIZE
     wake = str(ac.wake)
     key = (ac.airline, wake)
     fallback_key = ("ALL", wake)
@@ -394,13 +408,13 @@ def sample_initial_conditions(state: InitialConditionState, rng: random.Random) 
             "PRIOR_ONLY": 1 if ac.prior_only else 0,
             "ORIGIN": "" if ac.prior_only else ac.origin,
             "DEST": "" if ac.prior_only else ac.first_dest,
-            "STD_UTC_MINS": None if ac.prior_only else int(ac.first_std_mins),
-            "STA_UTC_MINS": None if ac.prior_only else int(ac.first_sta_mins),
+            "STD_REFTZ_MINS": None if ac.prior_only else int(ac.first_std_mins),
+            "STA_REFTZ_MINS": None if ac.prior_only else int(ac.first_sta_mins),
             "SINGLE_FLIGHT": 0 if ac.prior_only else int(ac.single_flight),
             "PRIOR_ORIGIN": ac.prior_origin,
             "PRIOR_DEST": ac.prior_dest,
-            "PRIOR_STD_UTC_MINS": ac.prior_std_mins,
-            "PRIOR_STA_UTC_MINS": ac.prior_sta_mins,
+            "PRIOR_STD_REFTZ_MINS": ac.prior_std_mins,
+            "PRIOR_STA_REFTZ_MINS": ac.prior_sta_mins,
         })
 
     return pd.DataFrame(rows)

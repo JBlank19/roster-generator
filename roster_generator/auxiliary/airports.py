@@ -24,6 +24,12 @@ import numpy as np
 import pandas as pd
 
 from roster_generator.config import PipelineConfig
+from roster_generator.time_window import (
+    DEFAULT_REFTZ,
+    DEFAULT_WINDOW_LENGTH_HOURS,
+    parse_datetime_series_to_reftz,
+    shift_series_by_window_start,
+)
 
 # --- Column aliases ---
 
@@ -38,7 +44,14 @@ AC_REG_COL = "AC_REG"
 
 # --- Capacity computation ---
 
-def _compute_capacities(schedule_df: pd.DataFrame, airports: list[str]) -> pd.DataFrame:
+def _compute_capacities(
+    schedule_df: pd.DataFrame,
+    airports: list[str],
+    *,
+    reftz: str = DEFAULT_REFTZ,
+    window_start_mins: int = 0,
+    window_length_mins: int = DEFAULT_WINDOW_LENGTH_HOURS * 60,
+) -> pd.DataFrame:
     """Compute maximum rolling 60-minute and 5-minute movement capacities.
 
     Both departures and arrivals are combined into a single movement flow.
@@ -68,8 +81,9 @@ def _compute_capacities(schedule_df: pd.DataFrame, airports: list[str]) -> pd.Da
     arrs.columns = ["airport", "ts"]
 
     all_moves = pd.concat([deps, arrs], ignore_index=True)
-    all_moves["ts"] = pd.to_datetime(all_moves["ts"], format="mixed", errors="coerce")
+    all_moves["ts"] = parse_datetime_series_to_reftz(all_moves["ts"], reftz)
     all_moves.dropna(subset=["ts"], inplace=True)
+    all_moves["ts_shifted"] = shift_series_by_window_start(all_moves["ts"], window_start_mins)
 
     # Restrict to airports of interest
     all_moves = all_moves[all_moves["airport"].isin(set(airports))]
@@ -81,18 +95,26 @@ def _compute_capacities(schedule_df: pd.DataFrame, airports: list[str]) -> pd.Da
             "burst_capacity": 1,
         })
 
-    # Bin into 5-minute slots within each day (288 slots per day)
-    all_moves["date"] = all_moves["ts"].dt.date
-    all_moves["bin5"] = (
-        all_moves["ts"].dt.hour * 12 + all_moves["ts"].dt.minute // 5
-    )
+    # Bin into 5-minute slots within each shifted REFTZ day.
+    all_moves["date"] = all_moves["ts_shifted"].dt.date
+    all_moves["minute_of_day"] = all_moves["ts_shifted"].dt.hour * 60 + all_moves["ts_shifted"].dt.minute
+    if int(window_length_mins) < 24 * 60:
+        all_moves = all_moves[all_moves["minute_of_day"] < int(window_length_mins)]
+        if all_moves.empty:
+            return pd.DataFrame({
+                "airport_id": airports,
+                "rolling_capacity": 1,
+                "burst_capacity": 1,
+            })
+    all_moves["bin5"] = all_moves["minute_of_day"] // 5
 
     # Count movements per (airport, date, bin5)
     counts = all_moves.groupby(["airport", "date", "bin5"], sort=False).size()
 
-    # Wide matrix: index = (airport, date), columns = bin5 [0..287]
+    n_bins = max(1, int(window_length_mins) // 5)
+    # Wide matrix: index = (airport, date), columns = bin5 [0..n_bins-1]
     daily_matrix = counts.unstack("bin5", fill_value=0)
-    daily_matrix = daily_matrix.reindex(columns=range(288), fill_value=0)
+    daily_matrix = daily_matrix.reindex(columns=range(n_bins), fill_value=0)
 
     # Burst capacity: max single 5-min bin per airport
     burst_caps = daily_matrix.max(axis=1).groupby("airport").max()
@@ -188,7 +210,13 @@ def generate_airports(config: PipelineConfig) -> None:
         _require_columns(schedule_df, [DEP_COL, ARR_COL, STD_COL, STA_COL], "schedule")
 
         # Capacities
-        capacity_df = _compute_capacities(schedule_df, all_airports)
+        capacity_df = _compute_capacities(
+            schedule_df,
+            all_airports,
+            reftz=config.reftz,
+            window_start_mins=config.window_start_mins,
+            window_length_mins=config.window_length_mins,
+        )
         airports_df = airports_df.merge(capacity_df, on="airport_id", how="left")
         airports_df["rolling_capacity"] = (
             airports_df["rolling_capacity"].fillna(1).astype(int).clip(lower=1)

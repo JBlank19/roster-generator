@@ -20,7 +20,7 @@ STD_COL = "STD_REFTZ"
 STA_COL = "STA_REFTZ"
 
 # Time discretization knobs.
-END_OF_DAY = 24 * 60
+END_OF_DAY = 24 * 60  # Legacy default full-day window.
 BIN_SIZE = 5
 P_NEXT_BIN_SIZE = 60
 
@@ -74,6 +74,8 @@ class SyntheticAircraft:
 @dataclass(slots=True)
 class InitialConditionState:
     """Fitted empirical distributions and injected Markov transition tables."""
+    window_length_mins: int = END_OF_DAY
+    hour_bins: int = 24
 
     # Learned distributions and lookup tables.
     daily_fleet_stats: dict[AirlineWakeKey, tuple[float, float]] = field(default_factory=dict)

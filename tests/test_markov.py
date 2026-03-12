@@ -182,6 +182,52 @@ class TestPrepareBaseFlights:
         with pytest.raises(ValueError, match="No usable flights"):
             _prepare_base_flights(_make_base_df(flights))
 
+    def test_non_utc_reftz_changes_departure_hour(self):
+        """DEP_HOUR_REFTZ should reflect conversion from UTC to configured REFTZ."""
+        flights = [
+            _make_flight("AC001", "IBE", "M", "LEMD", "EGLL",
+                         "2023-09-01 22:15", "2023-09-02 00:15"),
+        ]
+        df = _prepare_base_flights(
+            _make_base_df(flights),
+            reftz="Europe/Madrid",
+        )
+        # 22:15 UTC = 00:15 next day in Madrid (September).
+        assert int(df.iloc[0]["DEP_HOUR_REFTZ"]) == 0
+        assert int(df.iloc[0]["STD"].hour) == 0
+
+    def test_window_start_shifts_day_boundary(self):
+        """Window start should shift early-morning flights into previous-day late hours."""
+        flights = [
+            _make_flight("AC001", "IBE", "M", "LEMD", "EGLL",
+                         "2023-09-01 05:30", "2023-09-01 07:30"),
+        ]
+        df = _prepare_base_flights(
+            _make_base_df(flights),
+            reftz="UTC",
+            window_start_mins=6 * 60,
+        )
+        # 05:30 shifted by -6h => 23:30 previous day.
+        assert int(df.iloc[0]["DEP_HOUR_REFTZ"]) == 23
+        assert int(df.iloc[0]["STD"].hour) == 23
+
+    def test_window_length_filters_out_of_window_flights(self):
+        """Flights outside configured window length should be excluded."""
+        flights = [
+            _make_flight("AC001", "IBE", "M", "LEMD", "EGLL",
+                         "2023-09-01 17:00", "2023-09-01 19:00"),
+            _make_flight("AC002", "IBE", "M", "EGLL", "LFPG",
+                         "2023-09-01 19:30", "2023-09-01 21:00"),
+        ]
+        df = _prepare_base_flights(
+            _make_base_df(flights),
+            reftz="UTC",
+            window_start_mins=0,
+            window_length_mins=18 * 60,
+        )
+        assert len(df) == 1
+        assert int(df.iloc[0]["DEP_HOUR_REFTZ"]) == 17
+
     # --- Physical tests ---
 
     def test_no_self_loops_in_output(self, base_df):
@@ -213,7 +259,7 @@ class TestBuildMarkovTablesSoftware:
         """Primary DataFrame should contain the canonical Markov columns."""
         final_markov, _, _ = _build_markov_tables(base_df)
         expected = {AIRLINE_COL, AC_WAKE_COL, "PREV_ICAO", DEP_COL, ARR_COL,
-                    "DEP_HOUR_UTC", "PROB", "COUNT"}
+                    "DEP_HOUR_REFTZ", "PROB", "COUNT"}
         assert expected.issubset(set(final_markov.columns))
 
     def test_first_flights_excluded_from_primary(self, base_df):
@@ -244,7 +290,7 @@ class TestBuildMarkovTablesPhysical:
     def test_probabilities_sum_to_one(self, base_df):
         """For each (airline, wake, prev, dep, hour), probabilities must sum to 1."""
         final_markov, _, _ = _build_markov_tables(base_df)
-        group_cols = [AIRLINE_COL, AC_WAKE_COL, "PREV_ICAO", DEP_COL, "DEP_HOUR_UTC"]
+        group_cols = [AIRLINE_COL, AC_WAKE_COL, "PREV_ICAO", DEP_COL, "DEP_HOUR_REFTZ"]
         prob_sums = final_markov.groupby(group_cols)["PROB"].sum()
         np.testing.assert_allclose(prob_sums.values, 1.0, atol=1e-9)
 
@@ -267,7 +313,7 @@ class TestBuildMarkovTablesPhysical:
         df = _prepare_base_flights(_make_base_df(flights))
         final_markov, hourly, _ = _build_markov_tables(df)
         # EGLL departures happen at hour 10, LFPG departures at hour 14
-        assert len(final_markov["DEP_HOUR_UTC"].unique()) >= 2
+        assert len(final_markov["DEP_HOUR_REFTZ"].unique()) >= 2
 
     def test_memory_property(self):
         """Different prev_origins should yield different entries for the same (dep, hour)."""

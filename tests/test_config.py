@@ -71,6 +71,65 @@ class TestPipelineConfigInit:
         )
         assert cfg.suffix == "_v2"
 
+    def test_default_time_window_values(self, tmp_path):
+        """Default REFTZ window config should match UTC 00:00 24h."""
+        cfg = PipelineConfig(
+            schedule_file=tmp_path / "s.csv",
+            analysis_dir=tmp_path,
+            output_dir=tmp_path,
+        )
+        assert cfg.reftz == "UTC"
+        assert cfg.window_start == "00:00"
+        assert cfg.window_length_hours == 24
+        assert cfg.window_start_mins == 0
+        assert cfg.window_length_mins == 1440
+
+    def test_custom_time_window_values(self, tmp_path):
+        """Custom REFTZ/window values should be stored and derived correctly."""
+        cfg = PipelineConfig(
+            schedule_file=tmp_path / "s.csv",
+            analysis_dir=tmp_path,
+            output_dir=tmp_path,
+            reftz="Europe/Madrid",
+            window_start="06:30",
+            window_length_hours=18,
+        )
+        assert cfg.reftz == "Europe/Madrid"
+        assert cfg.window_start == "06:30"
+        assert cfg.window_length_hours == 18
+        assert cfg.window_start_mins == 390
+        assert cfg.window_length_mins == 1080
+
+    def test_invalid_reftz_raises(self, tmp_path):
+        """Invalid REFTZ must raise ValueError."""
+        with pytest.raises(ValueError, match="Invalid REFTZ"):
+            PipelineConfig(
+                schedule_file=tmp_path / "s.csv",
+                analysis_dir=tmp_path,
+                output_dir=tmp_path,
+                reftz="Not/A_Timezone",
+            )
+
+    def test_invalid_window_start_raises(self, tmp_path):
+        """Invalid WINDOW_START format must raise ValueError."""
+        with pytest.raises(ValueError, match="WINDOW_START"):
+            PipelineConfig(
+                schedule_file=tmp_path / "s.csv",
+                analysis_dir=tmp_path,
+                output_dir=tmp_path,
+                window_start="6:30",
+            )
+
+    def test_invalid_window_length_raises(self, tmp_path):
+        """WINDOW_LENGTH_HOURS outside [1,24] must raise ValueError."""
+        with pytest.raises(ValueError, match="WINDOW_LENGTH_HOURS"):
+            PipelineConfig(
+                schedule_file=tmp_path / "s.csv",
+                analysis_dir=tmp_path,
+                output_dir=tmp_path,
+                window_length_hours=25,
+            )
+
 
 # ---------------------------------------------------------------------------
 # __post_init__ — string-to-Path coercion

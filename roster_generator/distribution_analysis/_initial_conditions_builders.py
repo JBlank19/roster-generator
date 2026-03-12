@@ -151,7 +151,11 @@ def _build_origin_distribution(state: InitialConditionState) -> None:
 
 def _build_first_std_distribution(state: InitialConditionState) -> None:
     """Collect empirical first-STD samples per (airline, wake, origin)."""
-    grouped = state.first_dep.groupby([AIRLINE_COL, AC_WAKE_COL, DEP_COL], sort=False)
+    in_window = state.first_dep["FIRST_STD_MIN_5"] < int(state.window_length_mins)
+    filtered = state.first_dep.loc[in_window].copy()
+    if filtered.empty:
+        raise ValueError("No first departures inside configured REFTZ window.")
+    grouped = filtered.groupby([AIRLINE_COL, AC_WAKE_COL, DEP_COL], sort=False)
     for (airline, wake, origin), frame in grouped:
         key = (str(airline), str(wake), str(origin))
         state.first_std_samples[key] = frame["FIRST_STD_MIN_5"].astype(int).tolist()
@@ -277,6 +281,9 @@ def _build_turnaround_temporal_probabilities(state: InitialConditionState) -> No
         linked["PREV_STA"].dt.hour * 60 + linked["PREV_STA"].dt.minute
     ).astype(int)
     linked["HOUR_BIN"] = (linked["ARR_MIN"] // P_NEXT_BIN_SIZE).astype(int)
+    linked = linked[linked["HOUR_BIN"] < int(state.hour_bins)].copy()
+    if linked.empty:
+        return
 
     counts = (
         linked.groupby([AIRLINE_COL, AC_WAKE_COL, "HOUR_BIN", "CATEGORY"])
@@ -285,7 +292,10 @@ def _build_turnaround_temporal_probabilities(state: InitialConditionState) -> No
     )
 
     for (airline, wake), frame in counts.groupby([AIRLINE_COL, AC_WAKE_COL], sort=False):
-        state.p_next_hourly[(str(airline), str(wake))] = _hourly_next_day_profile(frame)
+        state.p_next_hourly[(str(airline), str(wake))] = _hourly_next_day_profile(
+            frame,
+            hour_bins=state.hour_bins,
+        )
 
     wake_counts = (
         linked.groupby([AC_WAKE_COL, "HOUR_BIN", "CATEGORY"])
@@ -294,7 +304,10 @@ def _build_turnaround_temporal_probabilities(state: InitialConditionState) -> No
     )
 
     for wake, frame in wake_counts.groupby(AC_WAKE_COL, sort=False):
-        state.p_next_hourly[("ALL", str(wake))] = _hourly_next_day_profile(frame)
+        state.p_next_hourly[("ALL", str(wake))] = _hourly_next_day_profile(
+            frame,
+            hour_bins=state.hour_bins,
+        )
 
 
 def _build_phys_ta_min(state: InitialConditionState) -> None:
@@ -352,10 +365,10 @@ def _build_backward_prev_from_markov(state: InitialConditionState) -> None:
     state.backward_prev_counts = backward_counts
 
 
-def _hourly_next_day_profile(frame: pd.DataFrame) -> dict[int, float]:
+def _hourly_next_day_profile(frame: pd.DataFrame, hour_bins: int) -> dict[int, float]:
     """Build hour -> P(next_day) from grouped intraday/next_day counts."""
     profile: dict[int, float] = {}
-    for hour in range(24):
+    for hour in range(int(hour_bins)):
         hour_slice = frame[frame["HOUR_BIN"] == hour]
         n_intra = int(hour_slice[hour_slice["CATEGORY"] == "intraday"]["N"].sum())
         n_next = int(hour_slice[hour_slice["CATEGORY"] == "next_day"]["N"].sum())

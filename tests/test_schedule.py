@@ -14,9 +14,9 @@ Covers
 
 Physical tests
 --------------
-- Flight time is strictly positive for every flight (STA_UTC > STD_UTC).
+- Flight time is strictly positive for every flight (STA_REFTZ_MINS > STD_REFTZ_MINS).
 - No self-routes (orig_id != dest_id).
-- Departure times are non-negative (STD_UTC >= 0).
+- Departure times are non-negative (STD_REFTZ_MINS >= 0).
 - Chain spatial continuity: each subsequent flight departs from the
   previous flight's destination.
 - Chain temporal ordering: each subsequent flight departs no earlier
@@ -65,8 +65,8 @@ def _make_initial_conditions(*rows) -> pd.DataFrame:
 
     Each row is a dict with keys:
       AC_REG, AC_OPER, AC_WAKE, ORIGIN, DEST,
-      STD_UTC_MINS, STA_UTC_MINS, SINGLE_FLIGHT, PRIOR_ONLY
-    and optionally PRIOR_ORIGIN, PRIOR_DEST, PRIOR_STD_UTC_MINS, PRIOR_STA_UTC_MINS.
+      STD_REFTZ_MINS, STA_REFTZ_MINS, SINGLE_FLIGHT, PRIOR_ONLY
+    and optionally PRIOR_ORIGIN, PRIOR_DEST, PRIOR_STD_REFTZ_MINS, PRIOR_STA_REFTZ_MINS.
     """
     return pd.DataFrame(rows)
 
@@ -89,7 +89,7 @@ def _make_markov(*rows) -> pd.DataFrame:
     """Build a markov DataFrame from (op, wake, prev, dep, arr, hour, count) tuples."""
     return pd.DataFrame(rows, columns=[
         "AC_OPER", "AC_WAKE", "PREV_ICAO", "DEP_ICAO",
-        "ARR_ICAO", "DEP_HOUR_UTC", "COUNT",
+        "ARR_ICAO", "DEP_HOUR_REFTZ", "COUNT",
     ])
 
 
@@ -164,7 +164,7 @@ IC_STANDARD = _make_initial_conditions(
     {
         "AC_REG": "AC001", "AC_OPER": "IBE", "AC_WAKE": "M",
         "ORIGIN": "LEMD", "DEST": "EGLL",
-        "STD_UTC_MINS": 480, "STA_UTC_MINS": 600,
+        "STD_REFTZ_MINS": 480, "STA_REFTZ_MINS": 600,
         "SINGLE_FLIGHT": 0, "PRIOR_ONLY": 0,
     },
 )
@@ -173,13 +173,13 @@ IC_TWO_AIRCRAFT = _make_initial_conditions(
     {
         "AC_REG": "AC001", "AC_OPER": "IBE", "AC_WAKE": "M",
         "ORIGIN": "LEMD", "DEST": "EGLL",
-        "STD_UTC_MINS": 480, "STA_UTC_MINS": 600,
+        "STD_REFTZ_MINS": 480, "STA_REFTZ_MINS": 600,
         "SINGLE_FLIGHT": 0, "PRIOR_ONLY": 0,
     },
     {
         "AC_REG": "AC002", "AC_OPER": "IBE", "AC_WAKE": "M",
         "ORIGIN": "EGLL", "DEST": "LEMD",
-        "STD_UTC_MINS": 540, "STA_UTC_MINS": 660,
+        "STD_REFTZ_MINS": 540, "STA_REFTZ_MINS": 660,
         "SINGLE_FLIGHT": 0, "PRIOR_ONLY": 0,
     },
 )
@@ -188,13 +188,13 @@ IC_SINGLE_FLIGHT = _make_initial_conditions(
     {
         "AC_REG": "AC010", "AC_OPER": "IBE", "AC_WAKE": "M",
         "ORIGIN": "LEMD", "DEST": "EGLL",
-        "STD_UTC_MINS": 480, "STA_UTC_MINS": 600,
+        "STD_REFTZ_MINS": 480, "STA_REFTZ_MINS": 600,
         "SINGLE_FLIGHT": 1, "PRIOR_ONLY": 0,
     },
 )
 
 
-def _write_all_inputs(tmp_path, ic_df, suffix=""):
+def _write_all_inputs(tmp_path, ic_df, suffix="", config_kwargs=None):
     """Write all 6 input files and return a PipelineConfig."""
     analysis = tmp_path / "analysis"
     output = tmp_path / "output"
@@ -218,14 +218,15 @@ def _write_all_inputs(tmp_path, ic_df, suffix=""):
         output_dir=output,
         seed=42,
         suffix=suffix,
+        **(config_kwargs or {}),
     )
 
 
-def _run_schedule(tmp_path, ic_df=None, suffix="", seed=42) -> pd.DataFrame:
+def _run_schedule(tmp_path, ic_df=None, suffix="", seed=42, config_kwargs=None) -> pd.DataFrame:
     """Write inputs, run generate_schedule, return output DataFrame."""
     if ic_df is None:
         ic_df = IC_STANDARD
-    cfg = _write_all_inputs(tmp_path, ic_df, suffix=suffix)
+    cfg = _write_all_inputs(tmp_path, ic_df, suffix=suffix, config_kwargs=config_kwargs)
     cfg.seed = seed
     generate_schedule(cfg)
     return pd.read_csv(cfg.output_path("schedule"))
@@ -320,7 +321,7 @@ class TestGenerateScheduleSoftware:
         df = _run_schedule(tmp_path)
         expected = {
             "airline_id", "aircraft_id", "orig_id", "dest_id",
-            "STD_UTC", "STA_UTC", "first_flight",
+            "STD_REFTZ_MINS", "STA_REFTZ_MINS", "first_flight",
             "is_prior_flight", "is_initial_departure",
             "single_flight_real",
             "turnaround_to_next_category", "turnaround_to_next_minutes",
@@ -379,6 +380,17 @@ class TestGenerateScheduleSoftware:
         """Each aircraft from initial_conditions must appear in the output."""
         df = _run_schedule(tmp_path, ic_df=IC_TWO_AIRCRAFT)
         assert set(df["aircraft_id"]) == {"AC001", "AC002"}
+
+    def test_window_length_18_hours_limits_departures(self, tmp_path):
+        """When WINDOW_LENGTH_HOURS=18, departures must stay within [0, 1080)."""
+        df = _run_schedule(
+            tmp_path,
+            ic_df=IC_TWO_AIRCRAFT,
+            config_kwargs={"window_length_hours": 18},
+        )
+        assert len(df) > 0
+        assert (df["STD_REFTZ_MINS"] >= 0).all()
+        assert (df["STD_REFTZ_MINS"] < 18 * 60).all()
 
 
 # ---------------------------------------------------------------------------
@@ -447,8 +459,8 @@ class TestScheduleRefactorGuards:
                     "AC_WAKE": "M",
                     "ORIGIN": "",
                     "DEST": "",
-                    "STD_UTC_MINS": np.nan,
-                    "STA_UTC_MINS": np.nan,
+                    "STD_REFTZ_MINS": np.nan,
+                    "STA_REFTZ_MINS": np.nan,
                     "SINGLE_FLIGHT": 0,
                     "PRIOR_ONLY": 1,
                 }
@@ -472,8 +484,8 @@ class TestScheduleRefactorGuards:
                     "AC_WAKE": "M",
                     "ORIGIN": "LEMD",
                     "DEST": "EGLL",
-                    "STD_UTC_MINS": np.nan,
-                    "STA_UTC_MINS": np.nan,
+                    "STD_REFTZ_MINS": np.nan,
+                    "STA_REFTZ_MINS": np.nan,
                     "SINGLE_FLIGHT": 0,
                     "PRIOR_ONLY": 0,
                 }
@@ -482,8 +494,45 @@ class TestScheduleRefactorGuards:
         ic_path = tmp_path / "initial_conditions.csv"
         _write_csv(ic_path, ic)
 
-        with pytest.raises(ValueError, match="missing STD_UTC_MINS/STA_UTC_MINS"):
+        with pytest.raises(ValueError, match="missing STD_REFTZ_MINS/STA_REFTZ_MINS"):
             load_initial_conditions(ic_path)
+
+    def test_load_initial_conditions_accepts_legacy_utc_columns(self, tmp_path):
+        """Legacy UTC-named initial condition columns should still be accepted."""
+        ic = pd.DataFrame(
+            [
+                {
+                    "AC_REG": "AC777",
+                    "AC_OPER": "IBE",
+                    "AC_WAKE": "M",
+                    "ORIGIN": "LEMD",
+                    "DEST": "EGLL",
+                    "STD_UTC_MINS": 480,
+                    "STA_UTC_MINS": 600,
+                    "SINGLE_FLIGHT": 0,
+                    "PRIOR_ONLY": 0,
+                }
+            ]
+        )
+        ic_path = tmp_path / "initial_conditions.csv"
+        _write_csv(ic_path, ic)
+
+        aircraft_list = load_initial_conditions(ic_path)
+        assert len(aircraft_list) == 1
+        assert aircraft_list[0].initial_flight is not None
+        assert aircraft_list[0].initial_flight.std == 480
+        assert aircraft_list[0].initial_flight.sta == 600
+
+    def test_generate_schedule_accepts_legacy_markov_hour_column(self, tmp_path):
+        """Schedule generation should read legacy DEP_HOUR_UTC if REFTZ column is absent."""
+        cfg = _write_all_inputs(tmp_path, IC_STANDARD)
+        markov_df = pd.read_csv(cfg.analysis_path("markov"))
+        markov_df = markov_df.rename(columns={"DEP_HOUR_REFTZ": "DEP_HOUR_UTC"})
+        markov_df.to_csv(cfg.analysis_path("markov"), index=False)
+
+        generate_schedule(cfg)
+        out_df = pd.read_csv(cfg.output_path("schedule"))
+        assert len(out_df) > 0
 
     def test_generate_chain_counts_missing_turnaround_as_no_destination(self, tmp_path, monkeypatch):
         """A missing turnaround sample increments no-destination single-flight counters."""
@@ -522,16 +571,16 @@ class TestGenerateSchedulePhysical:
         return _run_schedule(tmp_path, ic_df=ic_df)
 
     def test_flight_time_positive(self, tmp_path):
-        """Every flight must have STA_UTC > STD_UTC (positive flight time)."""
+        """Every flight must have STA_REFTZ_MINS > STD_REFTZ_MINS (positive flight time)."""
         df = self._run(tmp_path)
-        assert (df["STA_UTC"] > df["STD_UTC"]).all(), (
+        assert (df["STA_REFTZ_MINS"] > df["STD_REFTZ_MINS"]).all(), (
             "Some flights have non-positive flight time"
         )
 
     def test_departure_times_non_negative(self, tmp_path):
         """All departure times must be >= 0."""
         df = self._run(tmp_path)
-        assert (df["STD_UTC"] >= 0).all()
+        assert (df["STD_REFTZ_MINS"] >= 0).all()
 
     def test_no_self_routes(self, tmp_path):
         """No flight should have origin == destination."""
@@ -543,7 +592,7 @@ class TestGenerateSchedulePhysical:
         previous flight's destination."""
         df = self._run(tmp_path, ic_df=IC_TWO_AIRCRAFT)
         for ac_id, group in df.groupby("aircraft_id"):
-            flights = group.sort_values("STD_UTC").reset_index(drop=True)
+            flights = group.sort_values("STD_REFTZ_MINS").reset_index(drop=True)
             for i in range(1, len(flights)):
                 prev_dest = flights.iloc[i - 1]["dest_id"]
                 curr_orig = flights.iloc[i]["orig_id"]
@@ -557,10 +606,10 @@ class TestGenerateSchedulePhysical:
         previous flight's arrival."""
         df = self._run(tmp_path, ic_df=IC_TWO_AIRCRAFT)
         for ac_id, group in df.groupby("aircraft_id"):
-            flights = group.sort_values("STD_UTC").reset_index(drop=True)
+            flights = group.sort_values("STD_REFTZ_MINS").reset_index(drop=True)
             for i in range(1, len(flights)):
-                prev_sta = flights.iloc[i - 1]["STA_UTC"]
-                curr_std = flights.iloc[i]["STD_UTC"]
+                prev_sta = flights.iloc[i - 1]["STA_REFTZ_MINS"]
+                curr_std = flights.iloc[i]["STD_REFTZ_MINS"]
                 assert curr_std >= prev_sta, (
                     f"Aircraft {ac_id} flight {i}: departs at {curr_std} "
                     f"before previous arrival at {prev_sta}"
@@ -570,15 +619,15 @@ class TestGenerateSchedulePhysical:
         """Within each aircraft, turnaround time (next STD - current STA) >= 0."""
         df = self._run(tmp_path, ic_df=IC_TWO_AIRCRAFT)
         for _, group in df.groupby("aircraft_id"):
-            flights = group.sort_values("STD_UTC").reset_index(drop=True)
+            flights = group.sort_values("STD_REFTZ_MINS").reset_index(drop=True)
             for i in range(1, len(flights)):
-                ta = flights.iloc[i]["STD_UTC"] - flights.iloc[i - 1]["STA_UTC"]
+                ta = flights.iloc[i]["STD_REFTZ_MINS"] - flights.iloc[i - 1]["STA_REFTZ_MINS"]
                 assert ta >= 0, f"Negative turnaround: {ta} minutes"
 
     def test_turnaround_aligned_to_bin_size(self, tmp_path):
         """Departure times must be aligned to 5-minute bins."""
         df = self._run(tmp_path)
-        assert (df["STD_UTC"] % BIN_SIZE_MINS == 0).all(), (
+        assert (df["STD_REFTZ_MINS"] % BIN_SIZE_MINS == 0).all(), (
             "Some departure times are not aligned to 5-minute bins"
         )
 
@@ -618,8 +667,8 @@ class TestGenerateSchedulePhysical:
         row = initial.iloc[0]
         assert row["orig_id"] == "LEMD"
         assert row["dest_id"] == "EGLL"
-        assert row["STD_UTC"] == 480
-        assert row["STA_UTC"] == 600
+        assert row["STD_REFTZ_MINS"] == 480
+        assert row["STA_REFTZ_MINS"] == 600
 
     def test_flight_times_match_routes(self, tmp_path):
         """Flight durations must correspond to route flight times."""
@@ -632,7 +681,7 @@ class TestGenerateSchedulePhysical:
             key = (row["orig_id"], row["dest_id"])
             expected = route_times.get(key)
             if expected is not None:
-                actual = row["STA_UTC"] - row["STD_UTC"]
+                actual = row["STA_REFTZ_MINS"] - row["STD_REFTZ_MINS"]
                 assert actual == expected, (
                     f"Route {key}: expected {expected} min, got {actual} min"
                 )

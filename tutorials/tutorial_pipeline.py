@@ -15,6 +15,15 @@ Usage:
 
 Example:
     python main.py --seed 42 --suffix 0
+
+REFTZ Window Config
+-------------------
+PipelineConfig now supports:
+  - reftz (default: UTC)
+  - window_start (default: 00:00)
+  - window_length_hours (default: 24)
+
+Generated schema now uses REFTZ names (for example, STD_REFTZ_MINS/STA_REFTZ_MINS).
 """
 
 import argparse

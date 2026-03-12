@@ -55,19 +55,19 @@ def _build_initial_flight(row, is_prior_only: bool) -> Flight | None:
     if is_prior_only:
         return None
 
-    std_utc_mins = getattr(row, "STD_UTC_MINS", None)
-    sta_utc_mins = getattr(row, "STA_UTC_MINS", None)
-    if pd.isna(std_utc_mins) or pd.isna(sta_utc_mins):
+    std_reftz_mins = getattr(row, "STD_REFTZ_MINS", getattr(row, "STD_UTC_MINS", None))
+    sta_reftz_mins = getattr(row, "STA_REFTZ_MINS", getattr(row, "STA_UTC_MINS", None))
+    if pd.isna(std_reftz_mins) or pd.isna(sta_reftz_mins):
         raise ValueError(
             f"Invalid initial_conditions row for AC_REG={row.AC_REG}: "
-            "missing STD_UTC_MINS/STA_UTC_MINS without PRIOR_ONLY=1"
+            "missing STD_REFTZ_MINS/STA_REFTZ_MINS without PRIOR_ONLY=1"
         )
 
     return Flight(
         orig=row.ORIGIN,
         dest=row.DEST,
-        std=int(std_utc_mins),
-        sta=int(sta_utc_mins),
+        std=int(std_reftz_mins),
+        sta=int(sta_reftz_mins),
     )
 
 
@@ -79,11 +79,22 @@ def _build_prior_flight(row) -> Flight | None:
     if pd.isna(prior_origin):
         return None
 
+    prior_std_reftz = getattr(
+        row,
+        "PRIOR_STD_REFTZ_MINS",
+        getattr(row, "PRIOR_STD_UTC_MINS", None),
+    )
+    prior_sta_reftz = getattr(
+        row,
+        "PRIOR_STA_REFTZ_MINS",
+        getattr(row, "PRIOR_STA_UTC_MINS", None),
+    )
+
     return Flight(
         orig=row.PRIOR_ORIGIN,
         dest=row.PRIOR_DEST,
-        std=int(row.PRIOR_STD_UTC_MINS),
-        sta=int(row.PRIOR_STA_UTC_MINS),
+        std=int(prior_std_reftz),
+        sta=int(prior_sta_reftz),
     )
 
 
@@ -123,8 +134,8 @@ def _format_chain_row(ac: Aircraft, flight: Flight, chain_index: int, initial_in
         "aircraft_id": ac.reg,
         "orig_id": flight.orig,
         "dest_id": flight.dest,
-        "STD_UTC": flight.std,
-        "STA_UTC": flight.sta,
+        "STD_REFTZ_MINS": flight.std,
+        "STA_REFTZ_MINS": flight.sta,
         "first_flight": 1 if chain_index == 0 else 0,
         "is_prior_flight": is_prior_flight,
         "is_initial_departure": is_initial_departure,
@@ -225,6 +236,10 @@ def generate_schedule(config: PipelineConfig) -> None:
 
     print("[Schedule] --- SCHEDULE GENERATOR (Greedy Construction) ---")
     print(f"[Schedule] Seed={seed}, Suffix='{suffix}'")
+    print(
+        f"[Schedule] Window: REFTZ={config.reftz}, "
+        f"START={config.window_start}, LENGTH_H={config.window_length_hours}"
+    )
     print(f"[Schedule] Output: {paths['output']}")
     print(
         f"[Schedule] Inputs: IC={paths['initial_conditions']}, Routes={paths['routes']}, "
@@ -244,12 +259,17 @@ def generate_schedule(config: PipelineConfig) -> None:
         paths["markov"],
         paths["turnaround_intraday"],
         paths["turnaround_temporal"],
+        window_length_mins=config.window_length_mins,
     )
 
     aircraft_list = load_initial_conditions(paths["initial_conditions"])
     rng.shuffle(aircraft_list)
 
-    tracker = CapacityTracker(data.rolling_capacity, data.burst_capacity)
+    tracker = CapacityTracker(
+        data.rolling_capacity,
+        data.burst_capacity,
+        window_length_mins=config.window_length_mins,
+    )
     stats = GenerationStats(total_aircraft=len(aircraft_list))
     generator = ScheduleGenerator(data, tracker, stats, rng)
 
