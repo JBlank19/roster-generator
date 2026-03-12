@@ -2,8 +2,10 @@
 Route Flight-Time Catalogue
 
 Computes median scheduled and actual flight times for every route present in
-the Markov transition tables.  Results are grouped by
+the Markov transition tables. Results are grouped by
 (origin, destination, airline, wake) with an operator-agnostic "ALL" fallback.
+When actual times are disabled, the actual-time output column mirrors the
+scheduled median to preserve schema compatibility.
 
 Output:
   - routes{suffix}.csv
@@ -43,11 +45,19 @@ def _require_columns(df: pd.DataFrame, required: list[str], label: str) -> None:
         raise ValueError(f"Missing required columns in {label}: {missing}")
 
 
-def _prepare_flights(df: pd.DataFrame, reftz: str = DEFAULT_REFTZ) -> pd.DataFrame:
+def _prepare_flights(
+    df: pd.DataFrame,
+    reftz: str = DEFAULT_REFTZ,
+    *,
+    actual_times: bool = False,
+) -> pd.DataFrame:
     """Normalise columns, remap ZZZ airlines, compute flight durations."""
+    required = [AC_REG_COL, AIRLINE_COL, AC_WAKE_COL, DEP_COL, ARR_COL, STD_COL, STA_COL]
+    if actual_times:
+        required.extend([ATD_COL, ATA_COL])
     _require_columns(
         df,
-        [AC_REG_COL, AIRLINE_COL, AC_WAKE_COL, DEP_COL, ARR_COL, STD_COL, STA_COL, ATD_COL, ATA_COL],
+        required,
         "schedule",
     )
 
@@ -61,18 +71,23 @@ def _prepare_flights(df: pd.DataFrame, reftz: str = DEFAULT_REFTZ) -> pd.DataFra
 
     df[AC_WAKE_COL] = df[AC_WAKE_COL].fillna("").astype(str).str.upper().str.strip()
 
-    # Parse times (scheduled + actual)
-    for col in [STD_COL, STA_COL, ATD_COL, ATA_COL]:
+    # Parse scheduled times first; actuals are optional.
+    for col in [STD_COL, STA_COL]:
         df[col] = parse_datetime_series_to_reftz(df[col], reftz)
+    df = df.dropna(subset=[STD_COL, STA_COL]).copy()
 
-    df = df.dropna(subset=[STD_COL, STA_COL, ATD_COL, ATA_COL])
-
-    # Compute durations (minutes)
+    # Compute scheduled duration (minutes)
     df["SCHEDULED_FLIGHT_TIME"] = (df[STA_COL] - df[STD_COL]).dt.total_seconds() / 60.0
-    df["ACTUAL_FLIGHT_TIME"] = (df[ATA_COL] - df[ATD_COL]).dt.total_seconds() / 60.0
+    df = df[df["SCHEDULED_FLIGHT_TIME"] > 0].copy()
 
-    # Keep only positive durations
-    df = df[(df["SCHEDULED_FLIGHT_TIME"] > 0) & (df["ACTUAL_FLIGHT_TIME"] > 0)].copy()
+    if actual_times:
+        for col in [ATD_COL, ATA_COL]:
+            df[col] = parse_datetime_series_to_reftz(df[col], reftz)
+        df = df.dropna(subset=[ATD_COL, ATA_COL]).copy()
+        df["ACTUAL_FLIGHT_TIME"] = (df[ATA_COL] - df[ATD_COL]).dt.total_seconds() / 60.0
+        df = df[df["ACTUAL_FLIGHT_TIME"] > 0].copy()
+    else:
+        df["ACTUAL_FLIGHT_TIME"] = df["SCHEDULED_FLIGHT_TIME"]
 
     return df
 
@@ -122,6 +137,8 @@ def generate_routes(config: PipelineConfig) -> None:
 
     Only routes present in the Markov transition table are kept.  Both
     per-operator and operator-agnostic (``ALL``) statistics are produced.
+    When ``config.actual_times`` is false, the output ``time`` column mirrors
+    scheduled medians.
 
     Parameters
     ----------
@@ -153,8 +170,12 @@ def generate_routes(config: PipelineConfig) -> None:
 
     # 2. Load and prepare schedule
     print(f"[Routes] Schedule: {config.schedule_file}")
+    if config.actual_times:
+        print("[Routes]   Using actual flight-time medians")
+    else:
+        print("[Routes]   Using scheduled-only medians for route time")
     df = pd.read_csv(config.schedule_file)
-    df = _prepare_flights(df, reftz=config.reftz)
+    df = _prepare_flights(df, reftz=config.reftz, actual_times=config.actual_times)
 
     if df.empty:
         raise ValueError("No valid flights after normalisation.")

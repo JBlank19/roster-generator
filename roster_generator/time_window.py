@@ -13,14 +13,17 @@ import pytz
 DEFAULT_REFTZ = "UTC"
 DEFAULT_WINDOW_START = "00:00"
 DEFAULT_WINDOW_LENGTH_HOURS = 24
+DEFAULT_ACTUAL_TIMES = False
 
 PARAM_KEY_REFTZ = "REFTZ"
 PARAM_KEY_WINDOW_START = "WINDOW_START"
 PARAM_KEY_WINDOW_LENGTH_HOURS = "WINDOW_LENGTH_HOURS"
+PARAM_KEY_ACTUAL_TIMES = "ACTUAL_TIMES"
 ALLOWED_PARAM_KEYS = {
     PARAM_KEY_REFTZ,
     PARAM_KEY_WINDOW_START,
     PARAM_KEY_WINDOW_LENGTH_HOURS,
+    PARAM_KEY_ACTUAL_TIMES,
 }
 
 WINDOW_START_PATTERN = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
@@ -69,6 +72,23 @@ def validate_window_length_hours(value: Any) -> int:
     return out
 
 
+def validate_actual_times(value: Any) -> bool:
+    """Validate ACTUAL_TIMES and normalize it to bool."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in {0, 1}:
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"true", "1", "yes", "on"}:
+            return True
+        if text in {"false", "0", "no", "off"}:
+            return False
+    raise ValueError(
+        f"Invalid ACTUAL_TIMES={value!r}. Expected boolean-like true/false or 1/0."
+    )
+
+
 def parse_datetime_series_to_reftz(series: pd.Series, reftz: str) -> pd.Series:
     """Parse timestamps as UTC and convert them to REFTZ timezone-naive datetimes."""
     parsed = pd.to_datetime(series, errors="coerce", utc=True, format="mixed")
@@ -98,6 +118,7 @@ class WindowConfig:
     reftz: str = DEFAULT_REFTZ
     window_start: str = DEFAULT_WINDOW_START
     window_length_hours: int = DEFAULT_WINDOW_LENGTH_HOURS
+    actual_times: bool = DEFAULT_ACTUAL_TIMES
 
     @property
     def window_start_mins(self) -> int:
@@ -159,8 +180,12 @@ def resolve_window_config(raw_params: dict[str, Any]) -> WindowConfig:
     window_length_hours = validate_window_length_hours(
         raw_params.get(PARAM_KEY_WINDOW_LENGTH_HOURS, DEFAULT_WINDOW_LENGTH_HOURS)
     )
+    actual_times = validate_actual_times(
+        raw_params.get(PARAM_KEY_ACTUAL_TIMES, DEFAULT_ACTUAL_TIMES)
+    )
     return WindowConfig(
         reftz=reftz,
         window_start=window_start,
         window_length_hours=window_length_hours,
+        actual_times=actual_times,
     )

@@ -81,6 +81,7 @@ class TestPipelineConfigInit:
         assert cfg.reftz == "UTC"
         assert cfg.window_start == "00:00"
         assert cfg.window_length_hours == 24
+        assert cfg.actual_times is False
         assert cfg.window_start_mins == 0
         assert cfg.window_length_mins == 1440
 
@@ -93,10 +94,12 @@ class TestPipelineConfigInit:
             reftz="Europe/Madrid",
             window_start="06:30",
             window_length_hours=18,
+            actual_times="true",
         )
         assert cfg.reftz == "Europe/Madrid"
         assert cfg.window_start == "06:30"
         assert cfg.window_length_hours == 18
+        assert cfg.actual_times is True
         assert cfg.window_start_mins == 390
         assert cfg.window_length_mins == 1080
 
@@ -128,6 +131,16 @@ class TestPipelineConfigInit:
                 analysis_dir=tmp_path,
                 output_dir=tmp_path,
                 window_length_hours=25,
+            )
+
+    def test_invalid_actual_times_raises(self, tmp_path):
+        """ACTUAL_TIMES must be boolean-like."""
+        with pytest.raises(ValueError, match="ACTUAL_TIMES"):
+            PipelineConfig(
+                schedule_file=tmp_path / "s.csv",
+                analysis_dir=tmp_path,
+                output_dir=tmp_path,
+                actual_times="sometimes",
             )
 
 

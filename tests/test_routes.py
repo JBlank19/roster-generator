@@ -109,7 +109,7 @@ SCHEDULE_FLIGHTS = [
 @pytest.fixture
 def prepared_df():
     """Prepared DataFrame through _prepare_flights."""
-    return _prepare_flights(_make_df(SCHEDULE_FLIGHTS))
+    return _prepare_flights(_make_df(SCHEDULE_FLIGHTS), actual_times=True)
 
 
 @pytest.fixture
@@ -142,7 +142,7 @@ class TestPrepareFlightsSoftware:
                          "2023-09-01 08:00", "2023-09-01 10:00",
                          "2023-09-01 08:05", "2023-09-01 10:10"),
         ]
-        df = _prepare_flights(_make_df(flights))
+        df = _prepare_flights(_make_df(flights), actual_times=True)
         assert (df[AIRLINE_COL] == "EC-ABC").all()
 
     def test_missing_wake_raises_error(self):
@@ -166,7 +166,7 @@ class TestPrepareFlightsSoftware:
                          "not-a-date", "2023-09-01 13:30",
                          "2023-09-01 12:05", "2023-09-01 13:28"),
         ]
-        df = _prepare_flights(_make_df(flights))
+        df = _prepare_flights(_make_df(flights), actual_times=True)
         assert len(df) == 1
 
     def test_missing_actual_times_dropped(self):
@@ -179,8 +179,43 @@ class TestPrepareFlightsSoftware:
                          "2023-09-01 12:00", "2023-09-01 13:30",
                          "not-a-date", "2023-09-01 13:28"),
         ]
-        df = _prepare_flights(_make_df(flights))
+        df = _prepare_flights(_make_df(flights), actual_times=True)
         assert len(df) == 1
+
+    def test_missing_actual_columns_raise_when_enabled(self):
+        """ACTUAL_TIMES=true requires actual departure and arrival columns."""
+        flights = [
+            {
+                AC_REG_COL: "AC001",
+                AIRLINE_COL: "IBE",
+                AC_WAKE_COL: "M",
+                DEP_COL: "LEMD",
+                ARR_COL: "EGLL",
+                STD_COL: "2023-09-01 08:00",
+                STA_COL: "2023-09-01 10:00",
+            },
+        ]
+        with pytest.raises(ValueError, match="Missing required columns in schedule"):
+            _prepare_flights(pd.DataFrame(flights), actual_times=True)
+
+    def test_missing_actual_columns_allowed_when_disabled(self):
+        """ACTUAL_TIMES=false should allow schedules without actual columns."""
+        flights = [
+            {
+                AC_REG_COL: "AC001",
+                AIRLINE_COL: "IBE",
+                AC_WAKE_COL: "M",
+                DEP_COL: "LEMD",
+                ARR_COL: "EGLL",
+                STD_COL: "2023-09-01 08:00",
+                STA_COL: "2023-09-01 10:00",
+            },
+        ]
+        df = _prepare_flights(pd.DataFrame(flights), actual_times=False)
+        assert len(df) == 1
+        assert df.iloc[0]["ACTUAL_FLIGHT_TIME"] == pytest.approx(
+            df.iloc[0]["SCHEDULED_FLIGHT_TIME"]
+        )
 
     def test_negative_scheduled_duration_dropped(self):
         """Flights where STA < STD (negative scheduled duration) are removed."""
@@ -192,7 +227,7 @@ class TestPrepareFlightsSoftware:
                          "2023-09-01 12:00", "2023-09-01 13:30",
                          "2023-09-01 12:05", "2023-09-01 13:28"),
         ]
-        df = _prepare_flights(_make_df(flights))
+        df = _prepare_flights(_make_df(flights), actual_times=True)
         assert len(df) == 1
 
     def test_negative_actual_duration_dropped(self):
@@ -205,7 +240,7 @@ class TestPrepareFlightsSoftware:
                          "2023-09-01 12:00", "2023-09-01 13:30",
                          "2023-09-01 12:05", "2023-09-01 13:28"),
         ]
-        df = _prepare_flights(_make_df(flights))
+        df = _prepare_flights(_make_df(flights), actual_times=True)
         assert len(df) == 1
 
     def test_zero_duration_dropped(self):
@@ -218,7 +253,7 @@ class TestPrepareFlightsSoftware:
                          "2023-09-01 12:00", "2023-09-01 13:30",
                          "2023-09-01 12:05", "2023-09-01 13:28"),
         ]
-        df = _prepare_flights(_make_df(flights))
+        df = _prepare_flights(_make_df(flights), actual_times=True)
         assert len(df) == 1
 
     def test_wake_uppercased_and_stripped(self):
@@ -228,7 +263,7 @@ class TestPrepareFlightsSoftware:
                          "2023-09-01 08:00", "2023-09-01 10:00",
                          "2023-09-01 08:05", "2023-09-01 10:10"),
         ]
-        df = _prepare_flights(_make_df(flights))
+        df = _prepare_flights(_make_df(flights), actual_times=True)
         assert df.iloc[0][AC_WAKE_COL] == "H"
 
 
@@ -291,7 +326,7 @@ class TestBuildPerOperatorStatsSoftware:
                          "2023-09-04 08:00", "2023-09-04 10:30",  # 150 min sched
                          "2023-09-04 08:00", "2023-09-04 10:30"),  # 150 min actual
         ]
-        df = _prepare_flights(_make_df(flights))
+        df = _prepare_flights(_make_df(flights), actual_times=True)
         stats = _build_per_operator_stats(df)
         row = stats.iloc[0]
         # Median of [120, 130, 140, 150] = (130 + 140) / 2 = 135
@@ -445,6 +480,7 @@ class TestGenerateRoutes:
             schedule_file=tmp_path / "nonexistent.csv",
             analysis_dir=tmp_path / "analysis",
             output_dir=tmp_path / "output",
+            actual_times=True,
         )
         with pytest.raises(FileNotFoundError, match="Schedule file"):
             generate_routes(cfg)
@@ -456,6 +492,7 @@ class TestGenerateRoutes:
             schedule_file=schedule_path,
             analysis_dir=tmp_path / "analysis",
             output_dir=tmp_path / "output",
+            actual_times=True,
         )
         with pytest.raises(FileNotFoundError, match="Markov file"):
             generate_routes(cfg)
@@ -479,6 +516,7 @@ class TestGenerateRoutes:
             schedule_file=schedule_path,
             analysis_dir=tmp_path / "analysis",
             output_dir=tmp_path / "output",
+            actual_times=True,
         )
         with pytest.raises(ValueError, match="No flights match"):
             generate_routes(cfg)
@@ -491,6 +529,7 @@ class TestGenerateRoutes:
             schedule_file=schedule_path,
             analysis_dir=tmp_path / "analysis",
             output_dir=tmp_path / "output",
+            actual_times=True,
         )
         generate_routes(cfg)
         assert (tmp_path / "output" / "routes.csv").exists()
@@ -515,6 +554,7 @@ class TestGenerateRoutes:
             analysis_dir=tmp_path / "analysis",
             output_dir=tmp_path / "output",
             suffix="_test",
+            actual_times=True,
         )
         generate_routes(cfg)
         assert (tmp_path / "output" / "routes_test.csv").exists()
@@ -527,6 +567,7 @@ class TestGenerateRoutes:
             schedule_file=schedule_path,
             analysis_dir=tmp_path / "analysis",
             output_dir=tmp_path / "output",
+            actual_times=True,
         )
         generate_routes(cfg)
         df = pd.read_csv(tmp_path / "output" / "routes.csv")
@@ -542,6 +583,7 @@ class TestGenerateRoutes:
             schedule_file=schedule_path,
             analysis_dir=tmp_path / "analysis",
             output_dir=tmp_path / "output",
+            actual_times=True,
         )
         generate_routes(cfg)
         df = pd.read_csv(tmp_path / "output" / "routes.csv")
@@ -557,6 +599,7 @@ class TestGenerateRoutes:
             schedule_file=schedule_path,
             analysis_dir=tmp_path / "analysis",
             output_dir=tmp_path / "output",
+            actual_times=True,
         )
         generate_routes(cfg)
         df = pd.read_csv(tmp_path / "output" / "routes.csv")
@@ -574,6 +617,7 @@ class TestGenerateRoutes:
             schedule_file=schedule_path,
             analysis_dir=tmp_path / "analysis",
             output_dir=tmp_path / "output",
+            actual_times=True,
         )
         generate_routes(cfg)
         df = pd.read_csv(tmp_path / "output" / "routes.csv")
@@ -587,7 +631,34 @@ class TestGenerateRoutes:
             schedule_file=schedule_path,
             analysis_dir=tmp_path / "analysis",
             output_dir=tmp_path / "output",
+            actual_times=True,
         )
         generate_routes(cfg)
         assert (tmp_path / "output" / "routes.csv").exists()
         assert not (tmp_path / "analysis" / "routes.csv").exists()
+
+    def test_disabled_actual_times_allows_missing_actual_columns(self, tmp_path):
+        """ACTUAL_TIMES=false should generate routes from scheduled-only input."""
+        scheduled_only_flights = [
+            {
+                AC_REG_COL: flight[AC_REG_COL],
+                AIRLINE_COL: flight[AIRLINE_COL],
+                AC_WAKE_COL: flight[AC_WAKE_COL],
+                DEP_COL: flight[DEP_COL],
+                ARR_COL: flight[ARR_COL],
+                STD_COL: flight[STD_COL],
+                STA_COL: flight[STA_COL],
+            }
+            for flight in SCHEDULE_FLIGHTS
+        ]
+        schedule_path = self._write_schedule_csv(tmp_path, scheduled_only_flights)
+        self._write_markov_csv(tmp_path)
+        cfg = PipelineConfig(
+            schedule_file=schedule_path,
+            analysis_dir=tmp_path / "analysis",
+            output_dir=tmp_path / "output",
+            actual_times=False,
+        )
+        generate_routes(cfg)
+        df = pd.read_csv(tmp_path / "output" / "routes.csv")
+        assert (df["scheduled_time"] == df["time"]).all()

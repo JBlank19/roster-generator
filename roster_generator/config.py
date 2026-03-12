@@ -4,9 +4,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .time_window import (
+    DEFAULT_ACTUAL_TIMES,
     DEFAULT_REFTZ,
     DEFAULT_WINDOW_LENGTH_HOURS,
     DEFAULT_WINDOW_START,
+    validate_actual_times,
     validate_reftz,
     validate_window_length_hours,
     validate_window_start,
@@ -36,6 +38,8 @@ class PipelineConfig:
         Window start in HH:MM in reference timezone.
     window_length_hours : int
         Window length in hours (1..24).
+    actual_times : bool
+        Whether actual timestamp columns are required and used.
     """
 
     schedule_file: Path
@@ -46,6 +50,7 @@ class PipelineConfig:
     reftz: str = DEFAULT_REFTZ
     window_start: str = DEFAULT_WINDOW_START
     window_length_hours: int = DEFAULT_WINDOW_LENGTH_HOURS
+    actual_times: bool = DEFAULT_ACTUAL_TIMES
     window_start_mins: int = field(init=False)
     window_length_mins: int = field(init=False)
 
@@ -57,6 +62,7 @@ class PipelineConfig:
         self.reftz = validate_reftz(self.reftz)
         self.window_start = validate_window_start(self.window_start)
         self.window_length_hours = validate_window_length_hours(self.window_length_hours)
+        self.actual_times = validate_actual_times(self.actual_times)
         self.window_start_mins = window_start_to_minutes(self.window_start)
         self.window_length_mins = int(self.window_length_hours) * 60
 

@@ -24,13 +24,17 @@ PipelineConfig now supports:
   - window_length_hours (default: 24)
 
 Generated schema now uses REFTZ names (for example, STD_REFTZ_MINS/STA_REFTZ_MINS).
+Pipeline params can also disable actual-time requirements:
+  - ACTUAL_TIMES (default: false)
 """
 
 import argparse
 import os
 import sys
+from pathlib import Path
 
 import roster_generator
+from roster_generator.time_window import load_params_yaml, resolve_window_config
 
 
 def main() -> int:
@@ -48,6 +52,21 @@ def main() -> int:
     args = parser.parse_args()
 
     suffix = f"_{args.suffix}" if args.suffix else ""
+    params_path = Path(__file__).with_name("params.yaml")
+    raw_params = load_params_yaml(params_path)
+    window_cfg = resolve_window_config(raw_params)
+
+    print(
+        "[Main] Window config: "
+        f"REFTZ={window_cfg.reftz}, "
+        f"WINDOW_START={window_cfg.window_start}, "
+        f"WINDOW_LENGTH_HOURS={window_cfg.window_length_hours}, "
+        f"ACTUAL_TIMES={window_cfg.actual_times}"
+    )
+    if params_path.exists():
+        print(f"[Main] Loaded params from {params_path}")
+    else:
+        print(f"[Main] {params_path} not found. Using defaults.")
 
     # ------------------------------------------------------------------
     # Stage 0: Data Cleaning
@@ -73,6 +92,10 @@ def main() -> int:
         output_dir="output",
         seed=args.seed,
         suffix=suffix,
+        reftz=window_cfg.reftz,
+        window_start=window_cfg.window_start,
+        window_length_hours=window_cfg.window_length_hours,
+        actual_times=window_cfg.actual_times,
     )
     print("[Main] Setting up config done.")
 
